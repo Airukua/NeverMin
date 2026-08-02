@@ -1,0 +1,96 @@
+# ======================
+# ENV / SECRETS
+# ======================
+.env
+.env.*
+*.env
+*.local
+*.secret
+
+# API keys / credentials
+config/secrets.json
+secrets.*
+credentials.*
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# ======================
+# DATABASE
+# ======================
+*.sqlite
+*.db
+*.db-journal
+
+# ======================
+# LOGS
+# ======================
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ======================
+# NODE MODULES
+# ======================
+node_modules/
+
+# ======================
+# BUILD OUTPUT
+# ======================
+dist/
+build/
+out/
+coverage/
+
+# ======================
+# CACHE
+# ======================
+.cache/
+.tmp/
+temp/
+*.cache
+
+# ======================
+# OS FILES
+# ======================
+.DS_Store
+Thumbs.db
+
+# ======================
+# EDITOR / IDE
+# ======================
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+
+.vscode-test/
+
+.idea/
+
+# ======================
+# TEST OUTPUT
+# ======================
+test-results/
+playwright-report/
+
+# ======================
+# AI / MODEL FILES
+# ======================
+*.onnx
+*.pt
+*.bin
+*.model
+
+# ======================
+# MISC
+# ======================
+*.tgz
+*.zip
+*.tar.gz
