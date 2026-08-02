@@ -1,29 +1,24 @@
-# NeverMIN
+<div align="center">
 
-> **Never Mind the confusion — I’m gonna use this to speed up understanding.**
+# 🧭 NeverMIN
+
+**Never Mind the confusion — an onboarding buddy for unfamiliar codebases.**
+
+*Parses your project, builds a code graph, and shows you the main Input → Process → Output flow.*
+
+[![VS Code](https://img.shields.io/badge/VS%20Code-%5E1.90.0-007ACC?style=flat-square&logo=visualstudiocode&logoColor=white)](https://code.visualstudio.com/api)
+[![Node.js 20+](https://img.shields.io/badge/node-20%2B-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Tree-sitter](https://img.shields.io/badge/parser-Tree--sitter-4B8BBE?style=flat-square)](https://github.com/tree-sitter/tree-sitter)
+[![Providers](https://img.shields.io/badge/LLM-Gemini%20%7C%20DeepSeek-8A2BE2?style=flat-square)](#4-explain-code)
+[![License](https://img.shields.io/badge/license-TBD-lightgrey?style=flat-square)](#license)
+
+</div>
+
+---
 
 NeverMIN is a VS Code extension that acts like an onboarding buddy for unfamiliar codebases. It parses your project, builds a code relationship graph, infers the main **Input → Process → Output** data flow, and helps you explain code with an LLM (Gemini or DeepSeek).
 
----
-
-## Citation
-
-If you use, fork, or reference this project, please cite it as:
-
-```text
-NeverMIN — Never Mind the confusion — I’m gonna use this to speed up understanding.
-Author: Abdul Wahid Rukua
-```
-
-**Author:** [Abdul Wahid Rukua](https://github.com/)
-
----
-
-## Why NeverMIN?
-
-Joining a new repo often feels like noise: too many files, unclear entry points, and no obvious “where does data come in / go out?”
-
-NeverMIN focuses on that gap:
+Joining a new repo often feels like noise: too many files, unclear entry points, and no obvious "where does data come in / go out?" NeverMIN focuses on closing that gap.
 
 | Goal | What you get |
 |------|----------------|
@@ -32,31 +27,11 @@ NeverMIN focuses on that gap:
 | Stay in the editor | Explain selection, open symbols from the graph, open graph in the browser |
 | Optional AI narrative | LLM summary when an API key is configured |
 
----
-
-## Features
-
-- **Sidebar onboarding flow** — status, run analysis, select files, view results, settings
-- **Repo / selected-file analysis** — folder overview, important files, symbol counts
-- **Code graph (Cytoscape)** — files & symbols with `imports`, `calls`, `uses`, `defines`
-- **Graph Insights** — entry points, hubs, orphan files, and **main data flow**
-- **Main flow in the sidebar** — explicit Input / Process / Output for onboarding
-- **Light & dark graph themes** — compact overview mode (files) and detail mode (symbols)
-- **Open graph in browser** — full-screen view outside the VS Code webview
-- **Explain selection** — context chunks + Gemini / DeepSeek
-- **Secure API keys** — primary storage in VS Code `SecretStorage`
+> 📖 **Marketplace release coming soon.**
 
 ---
 
-## Requirements
-
-- VS Code `^1.90.0` (or compatible forks)
-- Node.js 20+ recommended for development
-- Optional: Gemini or DeepSeek API key for explanations and narrative insights
-
----
-
-## Quick start (development)
+## Install
 
 ```bash
 git clone <your-repo-url> NeverMIN
@@ -65,16 +40,14 @@ npm install
 npm run compile
 ```
 
+`npm install` runs `postinstall` to copy Tree-sitter WASM grammars into `media/grammars/`.
+
 Then in VS Code:
 
 1. Open this folder
 2. Press **F5** (`Run Extension`) to launch the Extension Development Host
 3. Open a workspace you want to explore
 4. Open the **NeverMIN** activity bar view
-
-`npm install` runs `postinstall` to copy Tree-sitter WASM grammars into `media/grammars/`.
-
-Useful scripts:
 
 | Script | Purpose |
 |--------|---------|
@@ -86,7 +59,7 @@ Useful scripts:
 
 ---
 
-## Usage
+## Quick Start
 
 ### 1. Configure a provider (optional but recommended)
 
@@ -97,35 +70,39 @@ In the NeverMIN sidebar → **Settings**, or Command Palette:
 
 Settings keys:
 
-- `nevermin.provider` — `gemini` | `deepseek`
-- `nevermin.apiKey` — fallback only; prefer SecretStorage via the command above
+```yaml
+nevermin.provider: gemini   # gemini | deepseek
+nevermin.apiKey: ""         # fallback only; prefer SecretStorage via the command above
+```
 
 ### 2. Analyze the repo
 
-1. Open **Status** to confirm workspace + API key state  
-2. Optionally check files under **Pilih File**  
-3. Under **Jalankan**, run full-repo or selected-file analysis  
-4. Open **Hasil Analisis** for stats, **Flow Utama (Data)**, entry points, hubs, and more  
+1. Open **Status** to confirm workspace + API key state
+2. Optionally check files under **Pilih File**
+3. Under **Jalankan**, run full-repo or selected-file analysis
+4. Open **Hasil Analisis** for stats, **Flow Utama (Data)**, entry points, hubs, and more
 
 ### 3. Explore the graph
 
-- Open the graph panel from analysis results  
-- Default view is **overview** (files + cross-file relations)  
-- Switch to **detail** for functions/classes  
-- Click **Flow Utama** / insight items in the sidebar to jump to related code  
-- Use **Buka di Browser** for a larger canvas  
+- Open the graph panel from analysis results
+- Default view is **overview** (files + cross-file relations)
+- Switch to **detail** for functions/classes
+- Click **Flow Utama** / insight items in the sidebar to jump to related code
+- Use **Buka di Browser** for a larger canvas
 
 ### 4. Explain code
 
 Select code (or rely on the active file) and run:
 
-- `NeverMIN: Jelaskan Kode Ini`
+```text
+NeverMIN: Jelaskan Kode Ini
+```
 
 ---
 
-## Main data flow (sidebar)
+## Main Data Flow
 
-After analysis, NeverMIN tries to present the application’s primary path as:
+After analysis, NeverMIN tries to present the application's primary path as:
 
 ```text
 Input   →  where data enters (forms, pickers, handlers, …)
@@ -133,7 +110,7 @@ Process →  transforms / services / utils in the middle
 Output  →  where results appear (tables, views, dashboards, …)
 ```
 
-This is heuristic (names, paths, and graph edges). It is meant as an onboarding map, not a formal data-flow proof.
+This is heuristic (names, paths, and graph edges) — an onboarding map, not a formal data-flow proof.
 
 ---
 
@@ -168,9 +145,7 @@ workspace
 
 Core business logic under `src/core/` avoids importing `vscode` so it stays unit-testable.
 
----
-
-## Supported languages (parser)
+### Supported languages (parser)
 
 | Extension | Grammar |
 |-----------|---------|
@@ -187,9 +162,7 @@ If WASM loading fails in a given environment, NeverMIN falls back to a simple re
 
 Contributions are welcome — especially if you care about developer experience.
 
-### Highest priority: UI
-
-The most needed help right now is **UI**:
+**Highest priority: UI**
 
 - Sidebar clarity and visual hierarchy (especially **Flow Utama**)
 - Graph readability (layout, density, light mode polish)
@@ -199,7 +172,7 @@ The most needed help right now is **UI**:
 
 If you want to contribute and are unsure where to start: **pick UI**.
 
-### Other welcome areas
+**Other welcome areas**
 
 - Stronger Input → Output flow heuristics
 - Better import / call / JSX edge detection
@@ -207,22 +180,35 @@ If you want to contribute and are unsure where to start: **pick UI**.
 - Tests around graph insights and parser edge cases
 - Docs and examples for common stacks (Next.js, Nest, Django, …)
 
-### Suggested workflow
+**Suggested workflow**
 
-1. Fork and create a branch  
-2. `npm install && npm run compile && npm test`  
-3. Keep `src/core` free of `vscode` imports when possible  
-4. Describe the UX problem you solved in the PR  
+1. Fork and create a branch
+2. `npm install && npm run compile && npm test`
+3. Keep `src/core` free of `vscode` imports when possible
+4. Describe the UX problem you solved in the PR
 
 ---
 
-## Roadmap (high level)
+## Roadmap
 
-- [ ] Richer UI for main flow and graph overview  
-- [ ] More language grammars (JavaScript / JSX first)  
-- [ ] Symbol-aware retrieval for explanations  
-- [ ] Stable Tree-sitter loading across Windows / WSL / remote hosts  
-- [ ] Publish a polished Marketplace release  
+- [ ] Richer UI for main flow and graph overview
+- [ ] More language grammars (JavaScript / JSX first)
+- [ ] Symbol-aware retrieval for explanations
+- [ ] Stable Tree-sitter loading across Windows / WSL / remote hosts
+- [ ] Publish a polished Marketplace release
+
+---
+
+## Citation
+
+```bibtex
+@software{nevermin2026,
+  author = {Abdul Wahid Rukua},
+  title  = {NeverMIN: Never Mind the confusion — I'm gonna use this to speed up understanding},
+  year   = {2026},
+  url    = {https://github.com/}
+}
+```
 
 ---
 
@@ -232,7 +218,9 @@ Specify your preferred license in this repository (for example MIT) before publi
 
 ---
 
-## Acknowledgements
+## Author
+
+**Abdul Wahid Rukua**
 
 Built with:
 
@@ -240,10 +228,12 @@ Built with:
 - [web-tree-sitter](https://github.com/tree-sitter/tree-sitter/tree/master/lib/binding_web) + [tree-sitter-wasms](https://www.npmjs.com/package/tree-sitter-wasms)
 - [Cytoscape.js](https://js.cytoscape.org/)
 
+[![GitHub](https://img.shields.io/badge/GitHub-Abdul%20Wahid%20Rukua-181717?style=flat-square&logo=github&logoColor=white)](https://github.com/)
+
 ---
 
 <p align="center">
   <strong>NeverMIN</strong><br />
-  <em>Never Mind the confusion — I’m gonna use this to speed up understanding.</em><br /><br />
+  <em>Never Mind the confusion — I'm gonna use this to speed up understanding.</em><br /><br />
   Author: <strong>Abdul Wahid Rukua</strong>
 </p>
