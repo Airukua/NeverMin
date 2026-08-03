@@ -213,8 +213,7 @@ If you want to contribute and are unsure where to start: **pick UI**.
 ---
 
 ## License
-
-Specify your preferred license in this repository (for example MIT) before publishing publicly. Until then, treat the project as authored by **Abdul Wahid Rukua** and request permission for redistribution if unclear.
+This Program under the MIT license
 
 ---
 
