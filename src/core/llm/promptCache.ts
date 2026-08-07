@@ -12,6 +12,7 @@ interface PromptCacheOptions {
 }
 
 const DEFAULT_TTL_MS = 60 * 60 * 1000;
+const MAX_ENTRIES = 200;
 const cache = new Map<string, PromptCacheEntry>();
 
 export function getCachedPromptResponse(
@@ -40,8 +41,27 @@ export function setCachedPromptResponse(
   response: string,
   options: PromptCacheOptions = {}
 ): void {
+  if (!response.trim()) {
+    return;
+  }
+
   const clock = options.clock ?? Date.now;
   const key = createPromptCacheKey(prompt, options.namespace);
+
+  if (cache.size >= MAX_ENTRIES && !cache.has(key)) {
+    let oldestKey: string | undefined;
+    let oldestTs = Number.POSITIVE_INFINITY;
+    for (const [entryKey, entry] of cache.entries()) {
+      if (entry.timestamp < oldestTs) {
+        oldestTs = entry.timestamp;
+        oldestKey = entryKey;
+      }
+    }
+    if (oldestKey) {
+      cache.delete(oldestKey);
+    }
+  }
+
   cache.set(key, { response, timestamp: clock() });
 }
 

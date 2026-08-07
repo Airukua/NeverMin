@@ -1,5 +1,6 @@
 import path from 'path';
-import { extractSymbols, SymbolInfo } from '../parser/astParser';
+import { SymbolInfo } from '../parser/astParser';
+import { extractSymbolsCached } from '../parser/symbolCache';
 import { GraphInsights } from '../graph/graphInsights';
 
 export interface RepoFileSnapshot {
@@ -88,7 +89,7 @@ export async function analyzeRepoFiles(files: RepoFileSnapshot[]): Promise<RepoA
   const folderCounts = new Map<string, number>();
 
   for (const file of files) {
-    const symbols = await extractSymbols(file.filePath, file.content);
+    const symbols = await extractSymbolsCached(file.filePath, file.content);
     analyzedFiles.push({
       filePath: file.filePath,
       workspaceRoot: file.workspaceRoot,

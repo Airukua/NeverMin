@@ -88,6 +88,10 @@ describe('buildGraphInsights', () => {
     assert.ok(insights.mainFlow?.input, 'input harus ada');
     assert.ok(insights.mainFlow?.output, 'output harus ada');
     assert.ok(
+      insights.mainFlow?.stages.every((stage) => stage.startLine >= 1 && stage.endLine >= stage.startLine),
+      'stage flow harus punya line range valid'
+    );
+    assert.ok(
       /DatePicker|RespondenTable|formatDate/.test(insights.mainFlow?.input ?? ''),
       `input tidak terduga: ${insights.mainFlow?.input}`
     );

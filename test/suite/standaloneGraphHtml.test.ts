@@ -1,31 +1,36 @@
 import * as assert from 'assert';
-import { buildStandaloneGraphHtml } from '../../src/ui/webview/standaloneGraphHtml';
+import { buildStandaloneGraphHtml, buildStandaloneMermaidHtml } from '../../src/ui/webview/standaloneGraphHtml';
 
 describe('buildStandaloneGraphHtml', () => {
-  it('membuat html mandiri berisi payload graph dan cytoscape', () => {
-    const html = buildStandaloneGraphHtml(
+  it('membuat html mandiri berisi diagram Mermaid', () => {
+    const html = buildStandaloneMermaidHtml(
       {
-        nodes: [
-          {
-            data: {
-              id: 'a.ts',
-              label: 'a.ts',
-              kind: 'file',
-              filePath: 'a.ts',
-              startLine: 1,
-              endLine: 2
-            }
-          }
-        ],
-        edges: []
+        architecture: 'flowchart TB\n  a_ts["a.ts"]',
+        modules: 'flowchart LR\n  src["src"]',
+        flow: 'flowchart LR\n  boot["boot"]',
+        functions: 'flowchart TB\n  tip["Pick a file"]',
+        nodeIndex: {},
+        stats: { fileCount: 1, shownFiles: 1, edgeCount: 0, truncated: false }
       },
-      'window.cytoscape = function(){ return { on(){}, nodes(){ return []; }, edges(){ return []; }, batch(fn){ fn(); }, fit(){}, resize(){}, zoom(){ return 1; } }; };'
+      'window.mermaid = { initialize(){}, async render(){ return { svg: "<svg></svg>" }; } };'
     );
 
-    assert.ok(html.includes('NeverMIN Code Graph'));
+    assert.ok(html.includes('NeverMIN Architecture'));
     assert.ok(html.includes('a.ts'));
-    assert.ok(html.includes('window.cytoscape'));
-    assert.ok(html.includes('View Utuh'));
-    assert.ok(html.includes('Insights'));
+    assert.ok(html.includes('window.mermaid') || html.includes('mermaid'));
+    assert.ok(html.includes('data-view="architecture"'));
+    assert.ok(html.includes('Arsitektur'));
+  });
+
+  it('wrapper lama tetap menghasilkan HTML Mermaid', () => {
+    const html = buildStandaloneGraphHtml(
+      {
+        nodes: [{ data: { label: 'legacy.ts' } }],
+        edges: []
+      },
+      'window.mermaid = {};'
+    );
+    assert.ok(html.includes('legacy.ts'));
+    assert.ok(html.includes('mermaid'));
   });
 });

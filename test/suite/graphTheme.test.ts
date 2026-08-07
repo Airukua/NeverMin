@@ -21,10 +21,12 @@ describe('graphTheme', () => {
     assert.ok(css.includes(LIGHT_GRAPH_THEME.bg));
     assert.ok(css.includes('--text:'));
     assert.ok(css.includes('--imports:'));
+    assert.ok(css.includes('--file:'));
+    assert.ok(css.includes('--file-border:'));
     assert.ok(css.includes('--file-text:'));
-    assert.strictEqual(LIGHT_GRAPH_THEME.file, '#FFF7ED');
-    assert.strictEqual(LIGHT_GRAPH_THEME.fileBorder, '#FDBA74');
-    assert.strictEqual(LIGHT_GRAPH_THEME.fileText, '#C2410C');
+    assert.ok(css.includes(LIGHT_GRAPH_THEME.file));
+    assert.ok(css.includes(LIGHT_GRAPH_THEME.fileBorder));
+    assert.ok(css.includes(LIGHT_GRAPH_THEME.fileText));
   });
 
   it('themeToJsObject menghasilkan JSON theme yang valid', () => {

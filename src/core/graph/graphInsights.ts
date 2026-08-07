@@ -1,5 +1,14 @@
 import { traceFrom } from './graphBuilder';
 import { CodeGraph, EdgeKind, GraphNode, NodeKind } from './types';
+import { buildMainFlowMermaid } from './flowMermaid';
+import { NeverminLanguage } from '../../i18n/types';
+import {
+  callerModuleDiversity,
+  computeCentrality,
+  isGenericUtilityNode,
+  kindWeight,
+  normalizeScoreMap
+} from './graphCentrality';
 
 const ENTRY_LIMIT = 6;
 const HUB_LIMIT = 6;
@@ -25,6 +34,8 @@ export interface GraphInsightFlowStage {
   name: string;
   nodeId: string;
   filePath: string;
+  startLine: number;
+  endLine: number;
 }
 
 export interface GraphInsightFlow {
@@ -41,6 +52,8 @@ export interface GraphInsightFlow {
   stages: GraphInsightFlowStage[];
   /** Skor seberapa jelas ini terlihat seperti alur data I/O. */
   ioScore: number;
+  /** Diagram Mermaid flowchart LR untuk Flow Utama. */
+  mermaid: string;
 }
 
 export interface GraphInsightStats {
@@ -61,6 +74,8 @@ export interface GraphInsights {
   stats: GraphInsightStats;
   summaryBullets: string[];
   narrative?: string;
+  /** Penjelasan singkat per node (key = GraphNode.id atau nama). */
+  nodeSummaries?: Record<string, string>;
 }
 
 interface DegreeInfo {
@@ -169,8 +184,8 @@ function classifyHint(node: GraphNode): FlowStageRole | null {
 
 /**
  * Tetapkan peran Input / Proses / Output pada path graph.
- * Aturan: ujung kiri = input, ujung kanan = output, tengah = proses —
- * lalu override dengan hint nama/path bila jelas.
+ * Prefer hint nama/path; bila tidak jelas, ujung kiri=input, kanan=output, tengah=proses.
+ * Tidak memaksa override kalau hint sudah kuat di ujung.
  */
 function assignStages(pathNodes: GraphNode[]): GraphInsightFlowStage[] {
   if (pathNodes.length === 0) {
@@ -184,13 +199,16 @@ function assignStages(pathNodes: GraphNode[]): GraphInsightFlowStage[] {
         role: hint,
         name: pathNodes[0].name,
         nodeId: pathNodes[0].id,
-        filePath: pathNodes[0].filePath
+        filePath: pathNodes[0].filePath,
+        startLine: pathNodes[0].startLine,
+        endLine: pathNodes[0].endLine
       }
     ];
   }
 
-  const roles: FlowStageRole[] = pathNodes.map((node, index) => {
-    const hint = classifyHint(node);
+  const hints = pathNodes.map((node) => classifyHint(node));
+  const roles: FlowStageRole[] = pathNodes.map((_node, index) => {
+    const hint = hints[index];
     if (hint) {
       return hint;
     }
@@ -203,19 +221,31 @@ function assignStages(pathNodes: GraphNode[]): GraphInsightFlowStage[] {
     return 'process';
   });
 
-  // Pastikan ujung tetap terbaca sebagai I/O untuk onboarding
-  if (roles[0] === 'output') {
+  // Soft fix: hanya koreksi ujung yang jelas saling bertentangan tanpa hint
+  if (!hints[0] && roles[0] === 'output') {
     roles[0] = 'input';
   }
-  if (roles[roles.length - 1] === 'input') {
+  if (!hints[hints.length - 1] && roles[roles.length - 1] === 'input') {
     roles[roles.length - 1] = 'output';
+  }
+
+  // Bila path punya hint input & output, pastikan stage mengikuti posisi hint tersebut
+  const inputHintIndex = hints.findIndex((hint) => hint === 'input');
+  const outputHintIndex = hints.findIndex((hint) => hint === 'output');
+  if (inputHintIndex >= 0) {
+    roles[inputHintIndex] = 'input';
+  }
+  if (outputHintIndex >= 0) {
+    roles[outputHintIndex] = 'output';
   }
 
   return pathNodes.map((node, index) => ({
     role: roles[index],
     name: node.name,
     nodeId: node.id,
-    filePath: node.filePath
+    filePath: node.filePath,
+    startLine: node.startLine,
+    endLine: node.endLine
   }));
 }
 
@@ -272,57 +302,104 @@ function toFlow(pathNodes: GraphNode[]): GraphInsightFlow {
     process: processNames,
     output: outputStage.name,
     stages,
-    ioScore: scoreIoFlow(stages)
+    ioScore: scoreIoFlow(stages),
+    mermaid: ''
   };
 }
 
-function pickEntryPoints(graph: CodeGraph, degrees: Map<string, DegreeInfo>): GraphInsightRef[] {
+function pickEntryPoints(
+  graph: CodeGraph,
+  degrees: Map<string, DegreeInfo>,
+  centrality: {
+    reversePageRank: Map<string, number>;
+    betweenness: Map<string, number>;
+  }
+): GraphInsightRef[] {
+  const rpr = normalizeScoreMap(centrality.reversePageRank);
+  const between = normalizeScoreMap(centrality.betweenness);
+
   const candidates = graph.nodes
     .filter((node) => node.kind !== 'file')
     .map((node) => {
       const degree = degrees.get(node.id) ?? emptyDegree();
       const hint = classifyHint(node);
+      // Reverse PageRank + betweenness = entry/controller; flat outDegree tetap sebagai sinyal ringan.
       const score =
-        degree.outCalls * 3 +
-        degree.outUses * 2 +
-        degree.outImports +
+        (rpr.get(node.id) ?? 0) * 28 +
+        (between.get(node.id) ?? 0) * 18 +
+        degree.outCalls * 1.5 +
+        degree.outUses +
+        degree.outImports * 0.5 +
         Math.max(0, 2 - degree.inDegree) +
         (node.name === 'main' || /^(app|index|page|layout|bootstrap|Sidebar)$/i.test(node.name) ? 4 : 0) +
         (hint === 'input' ? 5 : 0);
-      return { node, degree, score };
+      return { node, degree, score, rpr: rpr.get(node.id) ?? 0, between: between.get(node.id) ?? 0 };
     })
-    .filter((item) => item.score > 0 && (item.degree.outDegree > 0 || item.degree.outCalls > 0 || item.degree.outUses > 0))
+    .filter(
+      (item) =>
+        item.score > 0 &&
+        (item.degree.outDegree > 0 || item.degree.outCalls > 0 || item.degree.outUses > 0 || item.rpr > 0)
+    )
     .sort((left, right) => right.score - left.score || left.node.name.localeCompare(right.node.name));
 
   return candidates.slice(0, ENTRY_LIMIT).map((item) =>
     toRef(
       item.node,
-      item.score,
-      `${item.degree.outCalls} call, ${item.degree.outUses} use, ${item.degree.inDegree} incoming`
+      Math.round(item.score * 10) / 10,
+      `revPR ${(item.rpr * 100).toFixed(0)}%, betw ${(item.between * 100).toFixed(0)}%, ${item.degree.outCalls} call out`
     )
   );
 }
 
-function pickHubs(graph: CodeGraph, degrees: Map<string, DegreeInfo>): GraphInsightRef[] {
+function pickHubs(
+  graph: CodeGraph,
+  degrees: Map<string, DegreeInfo>,
+  lang: NeverminLanguage,
+  pageRank: Map<string, number>
+): GraphInsightRef[] {
+  const pr = normalizeScoreMap(pageRank);
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+
   const candidates = graph.nodes
+    .filter((node) => node.kind !== 'file')
     .map((node) => {
       const degree = degrees.get(node.id) ?? emptyDegree();
-      const score = degree.inImports * 3 + degree.inCalls * 3 + degree.inUses * 2 + degree.inDegree;
-      return { node, degree, score };
+      const diversity = callerModuleDiversity(node.id, graph, nodeById);
+      const utilityPenalty = isGenericUtilityNode(node) ? 0.35 : 1;
+      // PageRank = fondasi/hub; diversity naikkan skor kalau caller lintas folder; util generik diturunkan.
+      const score =
+        ((pr.get(node.id) ?? 0) * 24 +
+          degree.inImports * 1.2 +
+          degree.inCalls * 1.2 +
+          degree.inUses * 0.8) *
+        (0.55 + diversity * 0.75) *
+        utilityPenalty *
+        kindWeight(node);
+      return { node, degree, score, diversity, pr: pr.get(node.id) ?? 0, utility: utilityPenalty < 1 };
     })
-    .filter((item) => item.score > 0)
+    .filter((item) => item.score > 0.4)
     .sort((left, right) => right.score - left.score || left.node.name.localeCompare(right.node.name));
 
   return candidates.slice(0, HUB_LIMIT).map((item) =>
     toRef(
       item.node,
-      item.score,
-      `di-import ${item.degree.inImports}x, dipanggil ${item.degree.inCalls}x, dipakai ${item.degree.inUses}x`
+      Math.round(item.score * 10) / 10,
+      lang === 'en'
+        ? `PR ${(item.pr * 100).toFixed(0)}%, module-div ${(item.diversity * 100).toFixed(0)}%${item.utility ? ', util↓' : ''}`
+        : `PR ${(item.pr * 100).toFixed(0)}%, diver modul ${(item.diversity * 100).toFixed(0)}%${item.utility ? ', util↓' : ''}`
     )
   );
 }
 
-function pickOrphanFiles(graph: CodeGraph, degrees: Map<string, DegreeInfo>): GraphInsightRef[] {
+function pickOrphanFiles(
+  graph: CodeGraph,
+  degrees: Map<string, DegreeInfo>,
+  lang: NeverminLanguage
+): GraphInsightRef[] {
+  const reason =
+    lang === 'en'
+      ? 'No imports/calls/uses relations to other files'
+      : 'Tidak punya relasi imports/calls/uses ke file lain';
   return graph.nodes
     .filter((node) => node.kind === 'file')
     .filter((node) => {
@@ -330,7 +407,7 @@ function pickOrphanFiles(graph: CodeGraph, degrees: Map<string, DegreeInfo>): Gr
       return degree.inDegree === 0 && degree.outDegree === 0;
     })
     .slice(0, ORPHAN_LIMIT)
-    .map((node) => toRef(node, 0, 'Tidak punya relasi imports/calls/uses ke file lain'));
+    .map((node) => toRef(node, 0, reason));
 }
 
 function pickKeyFlows(graph: CodeGraph, entryPoints: GraphInsightRef[]): GraphInsightFlow[] {
@@ -376,20 +453,53 @@ function pickKeyFlows(graph: CodeGraph, entryPoints: GraphInsightRef[]): GraphIn
 }
 
 function buildSummaryBullets(
-  insights: Omit<GraphInsights, 'summaryBullets' | 'narrative' | 'generatedAt'>
+  insights: Omit<GraphInsights, 'summaryBullets' | 'narrative' | 'generatedAt'>,
+  lang: NeverminLanguage
 ): string[] {
   const bullets: string[] = [];
+  if (lang === 'en') {
+    bullets.push(
+      `Graph has ${insights.stats.nodeCount} nodes and ${insights.stats.edgeCount} edges` +
+        ` (${insights.stats.edgesByKind.imports ?? 0} imports, ${insights.stats.edgesByKind.calls ?? 0} calls, ${insights.stats.edgesByKind.uses ?? 0} uses).`
+    );
+    if (insights.mainFlow) {
+      bullets.push(
+        `Main data flow: Input: ${insights.mainFlow.input} → Output: ${insights.mainFlow.output}`
+      );
+    } else if (insights.keyFlows.length > 0) {
+      bullets.push(`Primary flow: ${insights.keyFlows[0].label}.`);
+    }
+    if (insights.entryPoints.length > 0) {
+      bullets.push(
+        `Notable entry points: ${insights.entryPoints
+          .slice(0, 3)
+          .map((item) => item.name)
+          .join(', ')}.`
+      );
+    }
+    if (insights.hubs.length > 0) {
+      bullets.push(
+        `Frequently used hubs: ${insights.hubs
+          .slice(0, 3)
+          .map((item) => item.name)
+          .join(', ')}.`
+      );
+    }
+    if (insights.orphanFiles.length > 0) {
+      bullets.push(
+        `${insights.orphanFiles.length} files look isolated (no cross-file relations), e.g. ${insights.orphanFiles[0].name}.`
+      );
+    }
+    return bullets;
+  }
+
   bullets.push(
     `Graph punya ${insights.stats.nodeCount} node dan ${insights.stats.edgeCount} edge` +
       ` (${insights.stats.edgesByKind.imports ?? 0} imports, ${insights.stats.edgesByKind.calls ?? 0} calls, ${insights.stats.edgesByKind.uses ?? 0} uses).`
   );
 
   if (insights.mainFlow) {
-    const processPart =
-      insights.mainFlow.process.length > 0 ? ` lewat ${insights.mainFlow.process.join(', ')}` : '';
-    bullets.push(
-      `Flow utama data: Input ${insights.mainFlow.input}${processPart} → Output ${insights.mainFlow.output}.`
-    );
+    bullets.push(`Flow utama data: Input: ${insights.mainFlow.input} → Output: ${insights.mainFlow.output}`);
   } else if (insights.keyFlows.length > 0) {
     bullets.push(`Alur utama: ${insights.keyFlows[0].label}.`);
   }
@@ -424,12 +534,23 @@ function buildSummaryBullets(
 /**
  * Infer entry points, hubs, dan alur utama (Input → Output) dari CodeGraph.
  */
-export function buildGraphInsights(graph: CodeGraph): GraphInsights {
+export function buildGraphInsights(
+  graph: CodeGraph,
+  lang: NeverminLanguage = 'id'
+): GraphInsights {
   const degrees = buildDegreeMap(graph);
-  const entryPoints = pickEntryPoints(graph, degrees);
-  const hubs = pickHubs(graph, degrees);
-  const orphanFiles = pickOrphanFiles(graph, degrees);
-  const keyFlows = pickKeyFlows(graph, entryPoints);
+  const symbols = graph.nodes.filter((node) => node.kind !== 'file');
+  const centrality = computeCentrality(graph, symbols);
+  const entryPoints = pickEntryPoints(graph, degrees, {
+    reversePageRank: centrality.reversePageRank,
+    betweenness: centrality.betweenness
+  });
+  const hubs = pickHubs(graph, degrees, lang, centrality.pageRank);
+  const orphanFiles = pickOrphanFiles(graph, degrees, lang);
+  const keyFlows = pickKeyFlows(graph, entryPoints).map((flow) => ({
+    ...flow,
+    mermaid: buildMainFlowMermaid(flow)
+  }));
   const mainFlow = keyFlows.length > 0 ? keyFlows[0] : null;
 
   const stats: GraphInsightStats = {
@@ -443,6 +564,6 @@ export function buildGraphInsights(graph: CodeGraph): GraphInsights {
   return {
     generatedAt: new Date().toISOString(),
     ...partial,
-    summaryBullets: buildSummaryBullets(partial)
+    summaryBullets: buildSummaryBullets(partial, lang)
   };
 }

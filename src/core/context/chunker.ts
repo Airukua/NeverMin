@@ -30,8 +30,8 @@ const DEFAULT_MAX_CANDIDATES_PER_QUERY = 10;
 const DEFAULT_CONTEXT_SEPARATOR = '\n';
 const DEFAULT_RRF_K = 60;
 
-export function chunkFile(filePath: string, content: string): CodeChunk[] {
-  return chunkBySymbol(filePath, content, [], { maxTokensPerChunk: DEFAULT_MAX_TOKENS_PER_CHUNK });
+export function chunkFile(filePath: string, content: string, symbols: ChunkSymbol[] = []): CodeChunk[] {
+  return chunkBySymbol(filePath, content, symbols, { maxTokensPerChunk: DEFAULT_MAX_TOKENS_PER_CHUNK });
 }
 
 export function chunkBySymbol(
@@ -91,7 +91,12 @@ export function selectRelevantChunks(
     rankChunksBm25(variant, chunks).slice(0, maxCandidatesPerQuery)
   );
   const fused = fuseRankings(rankedByQuery);
-  const moduleContext = chunks.find((chunk) => chunk.chunkKind === 'module');
+  const topChunk = fused[0]?.chunk;
+  const moduleContext =
+    chunks.find(
+      (chunk) =>
+        chunk.chunkKind === 'module' && (!topChunk || chunk.filePath === topChunk.filePath)
+    ) ?? chunks.find((chunk) => chunk.chunkKind === 'module');
   const selected: CodeChunk[] = [];
   let remainingBudget = tokenBudget;
 
@@ -857,10 +862,33 @@ function fuseRankings(rankings: Array<Array<{ chunk: CodeChunk; score: number }>
 }
 
 function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .match(/[a-z0-9_]+/g)
-    ?.filter(Boolean) ?? [];
+  const raw = text.match(/[A-Za-z0-9_]+/g) ?? [];
+  const tokens: string[] = [];
+
+  for (const token of raw) {
+    const lower = token.toLowerCase();
+    tokens.push(lower);
+
+    for (const part of lower.split('_')) {
+      if (part && part !== lower) {
+        tokens.push(part);
+      }
+    }
+
+    const camelSplit = token
+      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+      .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+      .toLowerCase()
+      .split(/\s+/);
+
+    for (const part of camelSplit) {
+      if (part && part !== lower) {
+        tokens.push(part);
+      }
+    }
+  }
+
+  return tokens;
 }
 
 function getRankingText(chunk: CodeChunk): string {

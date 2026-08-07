@@ -23,6 +23,10 @@ export async function setSelectedAnalysisFilePaths(
   await context.workspaceState.update(REPO_ANALYSIS_SELECTED_FILES_KEY, normalized);
 }
 
+export async function clearSelectedAnalysisFilePaths(context: vscode.ExtensionContext): Promise<void> {
+  await setSelectedAnalysisFilePaths(context, []);
+}
+
 export async function addSelectedAnalysisFilePath(
   context: vscode.ExtensionContext,
   filePath: string

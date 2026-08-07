@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 
 const CODE_FILE_GLOB = '**/*.{ts,tsx,js,jsx,mjs,cjs,py,go,java,kt,kts,rs,rb,php,sh,c,cc,cpp,h,hpp,cs,swift,md}';
 const ANALYSIS_FILE_GLOB = '**/*.{ts,tsx,js,jsx,mjs,cjs,py,go,java,kt,kts,rs,rb,php,sh,c,cc,cpp,h,hpp,cs,swift,md,json,yml,yaml,toml,txt}';
-const WORKSPACE_EXCLUDES = '{**/node_modules/**,**/.git/**,**/dist/**,**/out/**,**/.vscode-test/**,**/build/**,**/coverage/**,**/vendor/**,**/lib/**,**/libs/**,**/.next/**,**/.nuxt/**,**/.svelte-kit/**,**/.cache/**,**/.turbo/**,**/tmp/**,**/temp/**}';
+const WORKSPACE_EXCLUDES = '{**/node_modules/**,**/.git/**,**/dist/**,**/out/**,**/.vscode-test/**,**/build/**,**/coverage/**,**/vendor/**,**/.next/**,**/.nuxt/**,**/.svelte-kit/**,**/.cache/**,**/.turbo/**,**/tmp/**,**/temp/**}';
 const IGNORED_PATH_SEGMENTS = [
   'node_modules',
   '.git',
@@ -12,8 +12,6 @@ const IGNORED_PATH_SEGMENTS = [
   'build',
   'coverage',
   'vendor',
-  'lib',
-  'libs',
   '.next',
   '.nuxt',
   '.svelte-kit',

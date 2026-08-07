@@ -1,30 +1,51 @@
 import path from 'path';
 import * as vscode from 'vscode';
+import { t, webviewUiMessages } from '../../i18n';
 import { CodeGraph, GraphNode } from '../../core/graph/types';
 import { GraphInsights } from '../../core/graph/graphInsights';
-import { buildGraphPayload, WebviewGraphPayload } from './graphPayload';
-import { openGraphInExternalBrowser } from './standaloneGraphHtml';
 import {
-  DARK_GRAPH_THEME,
-  LIGHT_GRAPH_THEME,
-  getCytoscapeStyleBuilderScript,
-  getSharedGraphUiCss,
-  themeToCssVars,
-  themeToJsObject
-} from './graphTheme';
+  MermaidGraphView,
+  MermaidNodeMeta,
+  RepoMermaidBundle,
+  buildRepoMermaidBundle
+} from '../../core/graph/repoMermaid';
+import { getLanguage } from '../../utils/config';
+import { escapeJsonForScript } from './jsonScriptSafe';
+import { openMainFlowDiagram } from './flowDiagramPanel';
+import { openLearningMindMap } from './mindMapPanel';
 import { MARKDOWN_LITE_WEBVIEW_SCRIPT } from './markdownLite';
+import { Logger } from '../../utils/logger';
+import { preferredViewColumn, showDocumentInActiveColumn } from '../../utils/editorLayout';
 
 interface WebviewToExtensionMessage {
-  type: 'nodeClick' | 'openExternal';
-  node?: Partial<GraphNode>;
+  type:
+    | 'nodeClick'
+    | 'openExternal'
+    | 'openMainFlow'
+    | 'openMindMap'
+    | 'ready'
+    | 'copySource'
+    | 'renderStatus'
+    | 'webviewLife';
+  node?: Partial<GraphNode> & MermaidNodeMeta;
+  flow?: GraphInsights['mainFlow'];
+  source?: string;
+  generation?: number;
+  ok?: boolean;
+  detail?: string;
+  view?: string;
+  phase?: string;
+  elapsedMs?: number;
 }
 
 interface ExtensionToWebviewMessage {
-  type: 'setGraph' | 'setState';
-  graph?: WebviewGraphPayload;
+  type: 'setGraph' | 'setState' | 'setTheme';
+  bundle?: RepoMermaidBundle | null;
   insights?: GraphInsights | null;
   state?: GraphPanelState;
   message?: string;
+  mode?: 'light' | 'dark';
+  view?: MermaidGraphView;
 }
 
 export type GraphPanelState = 'loading' | 'empty' | 'error' | 'ready';
@@ -33,10 +54,208 @@ export interface GraphPanelOptions {
   state?: GraphPanelState;
   message?: string;
   insights?: GraphInsights;
+  view?: MermaidGraphView;
+  functionFilePath?: string;
+  focusNodeId?: string;
 }
 
-const panelGraphPayloads = new WeakMap<vscode.WebviewPanel, WebviewGraphPayload>();
+const panelBundles = new WeakMap<vscode.WebviewPanel, RepoMermaidBundle>();
 const panelInsights = new WeakMap<vscode.WebviewPanel, GraphInsights>();
+const panelPendingMessages = new WeakMap<vscode.WebviewPanel, ExtensionToWebviewMessage[]>();
+const panelWebviewReady = new WeakMap<vscode.WebviewPanel, boolean>();
+const panelGeneration = new WeakMap<vscode.WebviewPanel, number>();
+const panelHtmlAssignedAt = new WeakMap<vscode.WebviewPanel, number>();
+const panelReadyWaitTimer = new WeakMap<vscode.WebviewPanel, ReturnType<typeof setTimeout>>();
+const panelForceReloadCount = new WeakMap<vscode.WebviewPanel, number>();
+const panelLastLifePhase = new WeakMap<vscode.WebviewPanel, string>();
+let activeGraphPanel: vscode.WebviewPanel | undefined;
+
+/** Timeout menunggu handshake ready sebelum fallback reload HTML. */
+const WEBVIEW_READY_TIMEOUT_MS = 8000;
+/** Batas force-reload per panel supaya tidak thrash saat Mermaid lambat (WSL). */
+const WEBVIEW_MAX_FORCE_RELOADS = 1;
+
+function nextPanelGeneration(panel: vscode.WebviewPanel): number {
+  const generation = (panelGeneration.get(panel) ?? 0) + 1;
+  panelGeneration.set(panel, generation);
+  return generation;
+}
+
+function clearReadyWaitTimer(panel: vscode.WebviewPanel): void {
+  const timer = panelReadyWaitTimer.get(panel);
+  if (timer) {
+    clearTimeout(timer);
+    panelReadyWaitTimer.delete(panel);
+  }
+}
+
+function logWebview(
+  panel: vscode.WebviewPanel,
+  event: string,
+  detail?: string,
+  level: 'info' | 'warn' | 'error' = 'info'
+): void {
+  const gen = panelGeneration.get(panel) ?? 0;
+  const ready = panelWebviewReady.get(panel) ? 'ready' : 'not-ready';
+  const pending = (panelPendingMessages.get(panel) ?? []).length;
+  const assignedAt = panelHtmlAssignedAt.get(panel);
+  const ageMs = assignedAt ? Date.now() - assignedAt : -1;
+  const life = panelLastLifePhase.get(panel) || '-';
+  const forceN = panelForceReloadCount.get(panel) ?? 0;
+  const line = `[webview] ${event} · gen=${gen} · ${ready} · pending=${pending} · age=${ageMs}ms · life=${life} · force=${forceN}${
+    detail ? ` · ${detail}` : ''
+  }`;
+  if (level === 'warn') {
+    Logger.warn(line);
+  } else if (level === 'error') {
+    Logger.error(line);
+  } else {
+    Logger.info(line);
+  }
+}
+
+function assignPanelHtml(
+  panel: vscode.WebviewPanel,
+  html: string,
+  reason: string,
+  meta?: { archChars?: number; state?: string }
+): void {
+  clearReadyWaitTimer(panel);
+  panelWebviewReady.set(panel, false);
+  panelHtmlAssignedAt.set(panel, Date.now());
+  panelLastLifePhase.set(panel, 'html-assigned');
+  panel.webview.html = html;
+  logWebview(
+    panel,
+    'html-set',
+    `reason=${reason} · html=${html.length}char · arch=${meta?.archChars ?? '?'} · state=${meta?.state ?? '?'}`
+  );
+}
+
+function queuePanelMessage(panel: vscode.WebviewPanel, message: ExtensionToWebviewMessage): void {
+  const pending = panelPendingMessages.get(panel) ?? [];
+  // setGraph / setState menggantikan yang sejenis; setTheme selalu diantrikan
+  if (message.type === 'setGraph' || message.type === 'setState') {
+    const filtered = pending.filter((item) => item.type !== message.type);
+    filtered.push(message);
+    panelPendingMessages.set(panel, filtered);
+    logWebview(panel, 'queue', `type=${message.type} · queue=${filtered.length}`);
+    return;
+  }
+  pending.push(message);
+  panelPendingMessages.set(panel, pending);
+  logWebview(panel, 'queue', `type=${message.type} · queue=${pending.length}`);
+}
+
+async function flushPendingMessages(panel: vscode.WebviewPanel): Promise<void> {
+  const pending = panelPendingMessages.get(panel) ?? [];
+  panelPendingMessages.set(panel, []);
+  if (pending.length === 0) {
+    logWebview(panel, 'flush', 'kosong');
+    return;
+  }
+  logWebview(panel, 'flush', `mengirim ${pending.length} pesan · ${pending.map((m) => m.type).join(',')}`);
+  for (const message of pending) {
+    const ok = await panel.webview.postMessage(message);
+    if (!ok) {
+      logWebview(panel, 'flush-reject', `type=${message.type}`, 'warn');
+      reloadPanelHtml(panel, {}, 'flush-postMessage-failed');
+      return;
+    }
+    logWebview(panel, 'flush-ok', `type=${message.type}`);
+  }
+}
+
+function reloadPanelHtml(
+  panel: vscode.WebviewPanel,
+  options: {
+    state?: GraphPanelState;
+    message?: string;
+    view?: MermaidGraphView;
+  } = {},
+  reason = 'reload'
+): void {
+  const bundle = panelBundles.get(panel) ?? buildRepoMermaidBundle({ nodes: [], edges: [] });
+  const insights = panelInsights.get(panel);
+  const state =
+    options.state ?? (bundle.stats.fileCount > 0 || (bundle.architecture?.trim().length ?? 0) > 0 ? 'ready' : 'empty');
+  const generation = nextPanelGeneration(panel);
+  panelPendingMessages.set(panel, []);
+  const html = renderHtml(
+    panel.webview,
+    bundle,
+    state,
+    options.message,
+    toWebviewInsights(insights) ?? undefined,
+    options.view ?? 'architecture',
+    generation
+  );
+  assignPanelHtml(panel, html, reason, {
+    archChars: bundle.architecture.length,
+    state
+  });
+}
+
+async function postToGraphPanel(
+  panel: vscode.WebviewPanel,
+  message: ExtensionToWebviewMessage
+): Promise<void> {
+  if (panelWebviewReady.get(panel)) {
+    const ok = await panel.webview.postMessage(message);
+    if (!ok) {
+      logWebview(panel, 'postMessage-fail', `type=${message.type}`, 'warn');
+      if (message.type === 'setGraph' && message.bundle) {
+        panelBundles.set(panel, message.bundle);
+        if (message.insights) {
+          panelInsights.set(panel, message.insights);
+        }
+      }
+      reloadPanelHtml(
+        panel,
+        {
+          state: message.state,
+          message: message.message,
+          view: message.view
+        },
+        `postMessage-${message.type}-failed`
+      );
+    }
+    return;
+  }
+  queuePanelMessage(panel, message);
+}
+
+function hostThemeMode(): 'light' | 'dark' {
+  const kind = vscode.window.activeColorTheme.kind;
+  if (kind === vscode.ColorThemeKind.Dark || kind === vscode.ColorThemeKind.HighContrast) {
+    return 'dark';
+  }
+  return 'light';
+}
+
+/** Payload Insights yang cukup untuk panel (hindari HTML/postMessage membengkak). */
+function toWebviewInsights(insights?: GraphInsights | null): GraphInsights | null {
+  if (!insights) {
+    return null;
+  }
+  return {
+    generatedAt: insights.generatedAt,
+    entryPoints: (insights.entryPoints ?? []).slice(0, 8),
+    hubs: (insights.hubs ?? []).slice(0, 8),
+    mainFlow: insights.mainFlow
+      ? {
+          ...insights.mainFlow,
+          stages: (insights.mainFlow.stages ?? []).slice(0, 8)
+        }
+      : null,
+    keyFlows: [],
+    orphanFiles: [],
+    stats: insights.stats,
+    summaryBullets: (insights.summaryBullets ?? []).slice(0, 12),
+    narrative: insights.narrative,
+    nodeSummaries: undefined
+  };
+}
 
 export function createGraphPanel(
   extensionUri: vscode.Uri,
@@ -44,82 +263,311 @@ export function createGraphPanel(
   onNodeClick?: (node: GraphNode) => void | Promise<void>,
   options: GraphPanelOptions = {}
 ): vscode.WebviewPanel {
+  const bundle = buildRepoMermaidBundle(graph, options.insights, {
+    functionFilePath: options.functionFilePath,
+    focusNodeId: options.focusNodeId
+  });
+  const state = options.state ?? (graph.nodes.length > 0 ? 'ready' : 'empty');
+  const iconUri = vscode.Uri.joinPath(extensionUri, 'media', 'icon.png');
+  const iconPath = { light: iconUri, dark: iconUri };
+
+  if (activeGraphPanel) {
+    const panel = activeGraphPanel;
+    panel.iconPath = iconPath;
+    panelBundles.set(panel, bundle);
+    if (options.insights) {
+      panelInsights.set(panel, options.insights);
+    } else {
+      panelInsights.delete(panel);
+    }
+    const generation = nextPanelGeneration(panel);
+    panelPendingMessages.set(panel, []);
+    panelForceReloadCount.set(panel, 0);
+    const html = renderHtml(
+      panel.webview,
+      bundle,
+      state,
+      options.message,
+      options.insights,
+      options.view,
+      generation
+    );
+    assignPanelHtml(panel, html, 'reuse-panel', {
+      archChars: bundle.architecture.length,
+      state
+    });
+    panel.reveal(panel.viewColumn ?? preferredViewColumn(), false);
+    return panel;
+  }
+
   const panel = vscode.window.createWebviewPanel(
     'nevermin.graph',
-    'NeverMIN — Code Graph',
-    vscode.ViewColumn.Beside,
+    'Code Graph',
+    preferredViewColumn(),
     {
       enableScripts: true,
       retainContextWhenHidden: true,
       localResourceRoots: [
         vscode.Uri.joinPath(extensionUri, 'media'),
-        vscode.Uri.file(path.dirname(require.resolve('cytoscape/dist/cytoscape.min.js')))
+        vscode.Uri.file(path.dirname(require.resolve('mermaid/dist/mermaid.min.js')))
       ]
     }
   );
+  panel.iconPath = iconPath;
 
-  const initialPayload = buildGraphPayload(graph);
-  panelGraphPayloads.set(panel, initialPayload);
+  activeGraphPanel = panel;
+  const generation = nextPanelGeneration(panel);
+  panelPendingMessages.set(panel, []);
+  panelForceReloadCount.set(panel, 0);
+  panelBundles.set(panel, bundle);
   if (options.insights) {
     panelInsights.set(panel, options.insights);
   }
-  panel.webview.html = renderHtml(
+  const html = renderHtml(
     panel.webview,
-    graph,
-    options.state ?? (graph.nodes.length > 0 ? 'ready' : 'empty'),
+    bundle,
+    state,
     options.message,
-    options.insights
+    options.insights,
+    options.view,
+    generation
   );
+  assignPanelHtml(panel, html, 'create-panel', {
+    archChars: bundle.architecture.length,
+    state
+  });
 
-  panel.webview.onDidReceiveMessage(async (msg: WebviewToExtensionMessage) => {
-    if (msg.type === 'openExternal') {
-      const payload = panelGraphPayloads.get(panel);
-      if (!payload) {
-        vscode.window.showWarningMessage('Belum ada graph untuk dibuka di browser.');
+  const messageSub = panel.webview.onDidReceiveMessage(async (msg: WebviewToExtensionMessage) => {
+    if (msg.type === 'webviewLife') {
+      const phase = msg.phase || 'unknown';
+      panelLastLifePhase.set(panel, phase);
+      logWebview(
+        panel,
+        'life',
+        `phase=${phase} · clientGen=${msg.generation ?? '?'} · t=${msg.elapsedMs ?? '?'}ms${
+          msg.detail ? ` · ${msg.detail}` : ''
+        }`
+      );
+      return;
+    }
+
+    if (msg.type === 'ready') {
+      const expected = panelGeneration.get(panel);
+      if (typeof msg.generation === 'number' && expected !== undefined && msg.generation !== expected) {
+        logWebview(
+          panel,
+          'ready-ignored',
+          `gotGen=${msg.generation} · expectedGen=${expected}`,
+          'warn'
+        );
         return;
       }
-
-      await openGraphInExternalBrowser(payload, panelInsights.get(panel));
+      clearReadyWaitTimer(panel);
+      panelWebviewReady.set(panel, true);
+      panelForceReloadCount.set(panel, 0);
+      panelLastLifePhase.set(panel, 'ready');
+      logWebview(panel, 'ready-accepted', `gotGen=${msg.generation ?? expected ?? '?'}`);
+      await flushPendingMessages(panel);
       return;
     }
 
-    if (msg.type !== 'nodeClick') {
+    if (msg.type === 'renderStatus') {
+      if (msg.ok) {
+        logWebview(
+          panel,
+          'render-ok',
+          `view=${msg.view || 'architecture'} · ${msg.detail || ''}`.trim()
+        );
+      } else {
+        logWebview(panel, 'render-fail', msg.detail || 'unknown', 'error');
+      }
       return;
     }
 
-    if (!msg.node) {
-      vscode.window.showWarningMessage('NeverMIN menerima node graph yang tidak lengkap.');
+    if (msg.type === 'copySource' && msg.source) {
+      await vscode.env.clipboard.writeText(msg.source);
+      vscode.window.showInformationMessage(t('webview.copied'));
       return;
     }
+
+    if (msg.type === 'openExternal') {
+      const current = panelBundles.get(panel);
+      if (!current) {
+        vscode.window.showWarningMessage(t('webview.noDiagramYet'));
+        return;
+      }
+      const doc = await vscode.workspace.openTextDocument({
+        content: current.architecture,
+        language: 'markdown'
+      });
+      await showDocumentInActiveColumn(doc, { preview: true });
+      return;
+    }
+
+    if (msg.type === 'openMainFlow') {
+      const insights = panelInsights.get(panel);
+      if (insights?.mainFlow) {
+        openMainFlowDiagram(insights.mainFlow);
+      } else if (msg.flow) {
+        openMainFlowDiagram(msg.flow);
+      }
+      return;
+    }
+
+    if (msg.type === 'openMindMap') {
+      const insights = panelInsights.get(panel);
+      if (insights) {
+        openLearningMindMap(insights);
+      } else {
+        vscode.window.showWarningMessage(t('msg.noMindMap'));
+      }
+      return;
+    }
+
+    if (msg.type !== 'nodeClick' || !msg.node) {
+      return;
+    }
+
+    const asNode = {
+      id: msg.node.id || msg.node.filePath || '',
+      kind: (msg.node.kind as GraphNode['kind']) || 'file',
+      name: msg.node.name || 'node',
+      filePath: msg.node.filePath || '',
+      startLine: msg.node.startLine ?? 1,
+      endLine: msg.node.endLine ?? 1
+    } satisfies GraphNode;
 
     if (onNodeClick) {
-      await onNodeClick(msg.node as GraphNode);
+      await onNodeClick(asNode);
       return;
     }
+    await revealAndExplainNode(asNode);
+  });
 
-    await revealAndExplainNode(msg.node as GraphNode);
+  const themeSub = vscode.window.onDidChangeActiveColorTheme(() => {
+    void postToGraphPanel(panel, { type: 'setTheme', mode: hostThemeMode() });
+  });
+
+  panel.onDidDispose(() => {
+    messageSub.dispose();
+    themeSub.dispose();
+    clearReadyWaitTimer(panel);
+    if (activeGraphPanel === panel) {
+      activeGraphPanel = undefined;
+    }
+    panelBundles.delete(panel);
+    panelInsights.delete(panel);
+    panelPendingMessages.delete(panel);
+    panelWebviewReady.delete(panel);
+    panelGeneration.delete(panel);
+    panelHtmlAssignedAt.delete(panel);
+    panelForceReloadCount.delete(panel);
+    panelLastLifePhase.delete(panel);
   });
 
   return panel;
 }
 
+/**
+ * Kirim bundle Mermaid ke webview via postMessage (HTML reload hanya fallback).
+ * Reload full HTML setiap update sering bikin panel blank saat payload insights besar.
+ */
 export async function updateGraphPanel(
   panel: vscode.WebviewPanel,
   graph: CodeGraph,
   options: GraphPanelOptions = {}
 ): Promise<void> {
-  const payload = buildGraphPayload(graph);
-  panelGraphPayloads.set(panel, payload);
+  const bundle = buildRepoMermaidBundle(graph, options.insights, {
+    functionFilePath: options.functionFilePath,
+    focusNodeId: options.focusNodeId
+  });
+  panelBundles.set(panel, bundle);
   if (options.insights) {
     panelInsights.set(panel, options.insights);
+  } else {
+    panelInsights.delete(panel);
   }
-  await panel.webview.postMessage({
+
+  const state = options.state ?? (graph.nodes.length > 0 ? 'ready' : 'empty');
+  const insights = toWebviewInsights(options.insights ?? panelInsights.get(panel) ?? null);
+  const message: ExtensionToWebviewMessage = {
     type: 'setGraph',
-    graph: payload,
-    insights: options.insights ?? null,
-    state: options.state ?? (graph.nodes.length > 0 ? 'ready' : 'empty'),
-    message: options.message
-  } satisfies ExtensionToWebviewMessage);
+    bundle,
+    insights,
+    state,
+    message: options.message,
+    view: options.view
+  };
+
+  if (panelWebviewReady.get(panel)) {
+    const ok = await panel.webview.postMessage(message);
+    if (!ok) {
+      logWebview(panel, 'postMessage-fail', 'setGraph — fallback reload', 'warn');
+      reloadPanelHtml(
+        panel,
+        {
+          state,
+          message: options.message,
+          view: options.view
+        },
+        'postMessage-setGraph-failed'
+      );
+    } else {
+      logWebview(
+        panel,
+        'setGraph-sent',
+        `${state} · ${bundle.stats.shownFiles}/${bundle.stats.fileCount} file · arch=${bundle.architecture.length} char`
+      );
+    }
+    return;
+  }
+
+  queuePanelMessage(panel, message);
+  logWebview(
+    panel,
+    'setGraph-queued',
+    `${bundle.stats.shownFiles}/${bundle.stats.fileCount} file · arch=${bundle.architecture.length} char`
+  );
+
+  // Jika handshake ready gagal (script crash), jangan stuck forever di loading.
+  clearReadyWaitTimer(panel);
+  const timer = setTimeout(() => {
+    panelReadyWaitTimer.delete(panel);
+    if (panelWebviewReady.get(panel)) {
+      return;
+    }
+    if (panelBundles.get(panel) !== bundle) {
+      logWebview(panel, 'ready-timeout-skip', 'bundle sudah diganti');
+      return;
+    }
+    const forces = panelForceReloadCount.get(panel) ?? 0;
+    if (forces >= WEBVIEW_MAX_FORCE_RELOADS) {
+      logWebview(
+        panel,
+        'ready-timeout',
+        `sudah ${forces}x force-reload — berhenti thrash · life=${panelLastLifePhase.get(panel) || '-'}`,
+        'error'
+      );
+      return;
+    }
+    panelForceReloadCount.set(panel, forces + 1);
+    logWebview(
+      panel,
+      'ready-timeout',
+      `force reload HTML (${forces + 1}/${WEBVIEW_MAX_FORCE_RELOADS})`,
+      'warn'
+    );
+    reloadPanelHtml(
+      panel,
+      {
+        state,
+        message: options.message,
+        view: options.view
+      },
+      'ready-timeout-force-reload'
+    );
+  }, WEBVIEW_READY_TIMEOUT_MS);
+  panelReadyWaitTimer.set(panel, timer);
 }
 
 export async function setGraphPanelState(
@@ -127,19 +575,16 @@ export async function setGraphPanelState(
   state: GraphPanelState,
   message?: string
 ): Promise<void> {
-  await panel.webview.postMessage({
-    type: 'setState',
-    state,
-    message
-  } satisfies ExtensionToWebviewMessage);
+  await postToGraphPanel(panel, { type: 'setState', state, message });
 }
 
 export function resolveGraphNodeUri(node: Partial<GraphNode> | undefined): vscode.Uri | null {
-  const candidate = typeof node?.filePath === 'string' && node.filePath.trim().length > 0
-    ? node.filePath.trim()
-    : typeof node?.id === 'string'
-      ? node.id.trim()
-      : '';
+  const candidate =
+    typeof node?.filePath === 'string' && node.filePath.trim().length > 0
+      ? node.filePath.trim()
+      : typeof node?.id === 'string'
+        ? node.id.trim()
+        : '';
 
   if (!candidate) {
     return null;
@@ -152,1409 +597,1008 @@ export function resolveGraphNodeUri(node: Partial<GraphNode> | undefined): vscod
   return vscode.Uri.file(candidate);
 }
 
+function escapeHtmlAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function getNonce(): string {
+  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let text = '';
+  for (let i = 0; i < 32; i += 1) {
+    text += possible.charAt(Math.floor(Math.random() * possible.length));
+  }
+  return text;
+}
+
 function renderHtml(
   webview: vscode.Webview,
-  graph: CodeGraph,
+  bundle: RepoMermaidBundle,
   initialState: GraphPanelState,
   initialMessage?: string,
-  initialInsights?: GraphInsights
+  initialInsights?: GraphInsights,
+  initialView: MermaidGraphView = 'architecture',
+  generation = 1
 ): string {
   const nonce = getNonce();
-  const cytoscapePath = require.resolve('cytoscape/dist/cytoscape.min.js');
-  const cytoscapeUri = webview.asWebviewUri(vscode.Uri.file(cytoscapePath));
-  const graphPayload = JSON.stringify(buildGraphPayload(graph));
-  const insightsPayload = JSON.stringify(initialInsights ?? null);
+  const mermaidPath = require.resolve('mermaid/dist/mermaid.min.js');
+  const mermaidUri = webview.asWebviewUri(vscode.Uri.file(mermaidPath));
+  const ui = webviewUiMessages();
+  const payload = escapeJsonForScript({
+    bundle,
+    insights: toWebviewInsights(initialInsights),
+    state: initialState,
+    message: initialMessage ?? '',
+    view: initialView,
+    theme: hostThemeMode(),
+    generation,
+    mermaidUri: String(mermaidUri),
+    scriptNonce: nonce,
+    ui
+  });
+  const badgeLabel = `${bundle.stats.shownFiles || 0} file`;
+  const lang = ui.lang || getLanguage();
 
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="${escapeHtmlAttr(lang)}">
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="
     default-src 'none';
-    img-src ${webview.cspSource};
+    img-src ${webview.cspSource} data:;
     style-src ${webview.cspSource} 'unsafe-inline';
     script-src ${webview.cspSource} 'nonce-${nonce}';
+    worker-src ${webview.cspSource} blob:;
+    font-src ${webview.cspSource} data:;
   ">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script nonce="${nonce}" src="${cytoscapeUri}"></script>
   <style>
     :root {
-      ${themeToCssVars(LIGHT_GRAPH_THEME)}
+      color-scheme: dark;
+      --bg: #0b1220;
+      --panel: #111827;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --border: rgba(148, 163, 184, 0.22);
+      --accent: #2dd4bf;
+      --accent-2: #38bdf8;
+      --error: #f87171;
+      --warn: #fbbf24;
+      --card: rgba(17, 24, 39, 0.92);
     }
-    ${getSharedGraphUiCss()}
+    body[data-theme="light"] {
+      color-scheme: light;
+      --bg: #f8fafc;
+      --panel: #ffffff;
+      --text: #0f172a;
+      --muted: #64748b;
+      --border: rgba(15, 23, 42, 0.12);
+      --accent: #0f766e;
+      --accent-2: #0369a1;
+      --card: rgba(255, 255, 255, 0.94);
+    }
     * { box-sizing: border-box; }
-    body {
-      font-family: var(--vscode-font-family);
+    html, body {
+      margin: 0;
+      height: 100%;
+      background:
+        radial-gradient(ellipse 60% 40% at 100% 0%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 55%),
+        var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI Variable", "Segoe UI", sans-serif;
     }
-    .shell {
-      height: 100vh;
-      display: grid;
-      grid-template-rows: auto 1fr;
-    }
+    .shell { height: 100%; display: grid; grid-template-rows: auto 1fr; }
     .header {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 14px 18px;
-      border-bottom: 1px solid var(--border);
-      background: var(--header);
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 10px 14px; border-bottom: 1px solid var(--border);
+      background: color-mix(in srgb, var(--panel) 88%, transparent);
+      backdrop-filter: blur(10px);
     }
-    .title-row {
-      display: flex;
-      align-items: flex-start;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-    .title {
-      font-size: 15px;
-      font-weight: 700;
-      letter-spacing: 0.01em;
-    }
-    .subtitle {
-      margin-top: 3px;
-      color: var(--muted);
-      font-size: 12px;
-    }
-    .left {
-      min-width: 0;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      flex: 1;
-    }
-    .searchbar {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-    .searchbar input {
-      width: min(360px, 52vw);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      background: var(--input-bg);
-      color: var(--text);
-      padding: 8px 12px;
-      outline: none;
-    }
-    .searchbar input::placeholder {
-      color: var(--muted);
-    }
-    .searchbar button {
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      background: var(--input-bg);
-      color: var(--text);
-      padding: 8px 12px;
-      cursor: pointer;
-      font-size: 12px;
-    }
-    .searchbar button:hover {
-      background: color-mix(in srgb, var(--accent) 10%, var(--input-bg));
-    }
-    .searchbar button.primary {
-      border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-      background: color-mix(in srgb, var(--accent) 12%, transparent);
-      color: var(--accent);
-      font-weight: 600;
-    }
-    .legend-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px 14px;
-      align-items: center;
-    }
-    .legend,
-    .swatches {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      color: var(--muted);
-      font-size: 11px;
-    }
-    .legend span,
-    .swatches span {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 9px;
-      border-radius: 999px;
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-    }
-    .legend i {
-      width: 14px;
-      height: 2px;
-      border-radius: 999px;
-      display: inline-block;
-    }
-    .legend .imports { background: var(--imports); }
-    .legend .calls { background: var(--calls); }
-    .legend .uses { background: var(--uses); }
-    .legend .defines {
-      background: transparent;
-      border-top: 2px dashed var(--defines);
-      height: 0;
-      width: 14px;
-    }
-    .legend .extends { background: var(--extends); }
-    .swatches i {
-      width: 9px;
-      height: 9px;
-      border-radius: 999px;
-      display: inline-block;
-    }
-    .swatches .file {
-      background: var(--file);
-      border: 1.5px solid var(--file-border);
-      border-radius: 3px;
-    }
-    .swatches .function { background: var(--function); border-radius: 3px; }
-    .swatches .class { background: var(--class); }
-    .swatches .method { background: var(--method); border-radius: 3px; }
-    .swatches .variable { background: var(--variable); border-radius: 3px; }
+    .brand { display: flex; align-items: baseline; gap: 8px; }
+    .title { font-size: 14px; font-weight: 750; letter-spacing: -0.02em; }
     .badge {
-      padding: 6px 11px;
-      border-radius: 999px;
-      font-size: 12px;
-      background: var(--badge-bg);
-      border: 1px solid var(--border);
-      color: var(--muted);
-      white-space: nowrap;
-      align-self: flex-start;
+      font-size: 11px; padding: 3px 8px; border-radius: 999px;
+      border: 1px solid var(--border); color: var(--muted);
     }
+    .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .seg button {
+      border: 0; background: transparent; color: var(--muted);
+      padding: 6px 10px; font-size: 12px; cursor: pointer;
+    }
+    .seg button.active { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--text); }
+    .ghost, .primary {
+      border: 1px solid var(--border); background: transparent; color: var(--text);
+      border-radius: 10px; padding: 6px 10px; font-size: 12px; cursor: pointer;
+    }
+    .primary { background: color-mix(in srgb, var(--accent) 22%, transparent); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
     .content {
       position: relative;
-      min-height: 0;
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 300px;
-    }
-    .graph-area {
-      position: relative;
-      min-width: 0;
+      grid-template-columns: 1fr;
       min-height: 0;
-    }
-    #graph {
-      width: 100%;
       height: 100%;
-      display: none;
     }
-    .zoom-toolbar {
-      position: absolute;
-      left: 12px;
-      top: 50%;
-      transform: translateY(-50%);
-      z-index: 4;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      padding: 4px;
-      border-radius: 12px;
-      background: var(--panel-solid);
-      border: 1px solid var(--border);
-      box-shadow: 0 8px 24px color-mix(in srgb, var(--text) 8%, transparent);
+    .canvas-wrap {
+      position: relative;
+      min-height: 0;
+      height: 100%;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      overflow: hidden;
     }
-    .zoom-toolbar button {
-      width: 34px;
-      height: 34px;
-      border: none;
-      border-radius: 8px;
-      background: transparent;
-      color: var(--text);
-      font-size: 16px;
-      line-height: 1;
-      cursor: pointer;
+    .zoom-bar {
+      display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+      padding: 8px 12px; border-bottom: 1px solid var(--border);
+      background: color-mix(in srgb, var(--panel) 80%, transparent);
     }
-    .zoom-toolbar button:hover {
-      background: color-mix(in srgb, var(--accent) 12%, transparent);
-      color: var(--accent);
+    .zoom-bar .hint { color: var(--muted); font-size: 11px; margin-left: 4px; }
+    .zoom-bar button {
+      border: 1px solid var(--border); background: transparent; color: var(--text);
+      border-radius: 8px; min-width: 32px; height: 28px; cursor: pointer; font-size: 13px;
+    }
+    .zoom-bar button:hover { border-color: var(--accent); }
+    .zoom-bar #zoomLabel {
+      min-width: 48px; text-align: center; font-size: 12px; color: var(--muted);
+    }
+    .viewport-host {
+      position: relative;
+      min-height: 0;
+      overflow: hidden;
+      cursor: grab;
+      touch-action: none;
+      background:
+        radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--border) 70%, transparent) 1px, transparent 0) 0 0 / 18px 18px;
+    }
+    .viewport-host.is-panning { cursor: grabbing; }
+    .viewport {
+      transform-origin: 0 0;
+      padding: 24px;
+      width: max-content;
+      min-width: 100%;
+      min-height: 100%;
+    }
+    #diagram {
+      min-height: 200px;
+      display: inline-block;
+    }
+    #diagram svg {
+      max-width: none;
+      height: auto;
+      display: block;
+      shape-rendering: geometricPrecision;
+      text-rendering: geometricPrecision;
+    }
+    #diagram .node, #diagram .node * { cursor: pointer !important; }
+    #diagram .node:hover > rect,
+    #diagram .node:hover > polygon,
+    #diagram .node:hover > circle,
+    #diagram .node:hover > path {
+      stroke: var(--accent) !important;
+      stroke-width: 2.5px !important;
     }
     .insights {
+      display: none;
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: min(360px, 42vw);
+      z-index: 6;
       border-left: 1px solid var(--border);
-      background: var(--panel);
+      background: color-mix(in srgb, var(--panel) 96%, transparent);
+      backdrop-filter: blur(12px);
       overflow: auto;
-      padding: 14px 14px 20px;
+      padding: 12px 14px 20px;
     }
-    .insights h2 {
-      margin: 0 0 8px;
-      font-size: 14px;
+    .content.insights-open .insights { display: block; }
+    .content.insights-collapsed .insights { display: none; }
+    .insights h2 { margin: 0 0 8px; font-size: 13px; }
+    .insights h3 { margin: 14px 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+    .md-body { font-size: 12px; line-height: 1.5; color: var(--text); }
+    .muted { color: var(--muted); font-size: 12px; }
+    .chip-list { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip {
+      border: 1px solid var(--border); border-radius: 999px; padding: 4px 8px;
+      font-size: 11px; background: transparent; color: var(--text); cursor: pointer;
     }
-    .insights .muted,
-    .insights .md-body {
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.55;
-      margin: 0 0 12px;
+    .chip:hover { border-color: var(--accent); }
+    .stat-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+    .stat {
+      border: 1px solid var(--border); border-radius: 12px; padding: 8px 10px;
+      background: color-mix(in srgb, var(--panel) 80%, transparent);
     }
-    .insights .md-body {
-      color: var(--text);
+    .stat strong { display: block; font-size: 16px; }
+    .stat small { color: var(--muted); }
+    .state {
+      position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+      background: color-mix(in srgb, var(--bg) 82%, transparent); z-index: 3; padding: 24px; text-align: center;
     }
-    .insights .md-body p {
-      margin: 0 0 10px;
-      color: var(--text);
+    .state.is-active { display: flex; }
+    .card {
+      max-width: 420px; padding: 22px; border-radius: 16px; border: 1px solid var(--border);
+      background: var(--card); box-shadow: 0 18px 50px color-mix(in srgb, var(--text) 12%, transparent);
     }
-    .insights .md-body h3,
-    .insights .md-body h4,
-    .insights .md-body h5 {
-      margin: 12px 0 6px;
-      font-size: 12px;
-      color: var(--text);
-      letter-spacing: 0.02em;
-    }
-    .insights .md-body ul {
-      margin: 0 0 10px;
-      padding-left: 18px;
-    }
-    .insights .md-body li {
-      margin: 0 0 6px;
-      color: var(--text);
-    }
-    .insights .md-body strong {
-      color: var(--text);
-      font-weight: 700;
-    }
-    .insights .md-body code {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 11px;
-      padding: 1px 5px;
-      border-radius: 6px;
-      background: color-mix(in srgb, var(--accent) 12%, var(--input-bg));
-      border: 1px solid var(--border);
-    }
-    .insights h3 {
-      margin: 16px 0 8px;
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      color: var(--muted);
-    }
-    .node-detail {
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      background: var(--card-bg);
-      padding: 12px;
-      font-size: 12px;
-      line-height: 1.5;
-      color: var(--text);
-      min-height: 72px;
-    }
-    .node-detail.empty,
-    .node-detail .placeholder {
-      color: var(--muted);
-    }
-    .node-detail dl {
-      margin: 0;
-    }
-    .node-detail dt {
-      color: var(--muted);
-      font-size: 11px;
-      margin-top: 8px;
-    }
-    .node-detail dt:first-child {
-      margin-top: 0;
-    }
-    .node-detail dd {
-      margin: 2px 0 0;
-      word-break: break-all;
-      font-weight: 600;
-    }
-    .insight-list,
-    .flow-list {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .insight-item {
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      background: var(--card-bg);
-      color: var(--text);
-      text-align: left;
-      padding: 8px 10px;
-      cursor: pointer;
-      font-size: 12px;
-    }
-    .insight-item:hover,
-    .insight-item.active {
-      border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-      background: color-mix(in srgb, var(--accent) 10%, transparent);
-    }
-    .insight-item small,
-    .flow-card small {
-      display: block;
-      margin-top: 4px;
-      color: var(--muted);
-      font-size: 11px;
-      font-weight: 400;
-    }
-    .flow-card {
-      border: 1px solid var(--border);
-      border-left-width: 4px;
-      border-radius: 10px;
-      background: var(--card-bg);
-      color: var(--text);
-      text-align: left;
-      padding: 10px 12px;
-      cursor: pointer;
-      font-size: 12px;
-      box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 4%, transparent);
-    }
-    .flow-card:hover,
-    .flow-card.active {
-      background: color-mix(in srgb, var(--accent) 6%, var(--card-bg));
-    }
-    .flow-card.flow-imports { border-left-color: var(--imports); }
-    .flow-card.flow-calls { border-left-color: var(--calls); }
-    .flow-card.flow-uses { border-left-color: var(--uses); }
-    .stats-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-    }
-    .stat-card {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 10px 11px;
-      border-radius: 12px;
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-    }
-    .stat-card strong {
-      display: block;
-      font-size: 16px;
-      line-height: 1.2;
-      color: var(--text);
-    }
-    .stat-card small {
-      color: var(--muted);
-      font-size: 11px;
-    }
-    .stat-icon {
-      width: 30px;
-      height: 30px;
-      border-radius: 9px;
-      display: grid;
-      place-items: center;
-      font-size: 11px;
-      font-weight: 800;
-      flex-shrink: 0;
-    }
-    .stat-icon.nodes { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
-    .stat-icon.edges { background: color-mix(in srgb, var(--calls) 16%, transparent); color: var(--calls); }
-    .stat-icon.files { background: color-mix(in srgb, var(--file-text) 14%, transparent); color: var(--file-text); }
-    .stat-icon.functions { background: color-mix(in srgb, var(--class) 16%, transparent); color: var(--class); }
-    .tip-box {
-      margin-top: 16px;
-      padding: 12px 13px;
-      border-radius: 12px;
-      background: #EFF6FF;
-      border: 1px solid #BFDBFE;
-      color: #1E40AF;
-      font-size: 12px;
-      line-height: 1.45;
-    }
-    body[data-theme="dark"] .tip-box {
-      background: rgba(87, 166, 255, 0.12);
-      border-color: rgba(87, 166, 255, 0.35);
-      color: #BFDBFE;
+    .card h2 { margin: 0 0 8px; font-size: 17px; }
+    .card p { margin: 0; color: var(--muted); line-height: 1.5; }
+    .source {
+      margin-top: 12px; width: 100%; max-height: 140px; overflow: auto;
+      border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px;
+      background: color-mix(in srgb, var(--panel) 88%, transparent);
+      color: var(--muted); font-size: 11px; white-space: pre-wrap;
     }
     @media (max-width: 900px) {
-      .content {
-        grid-template-columns: 1fr;
-        grid-template-rows: 1fr auto;
-      }
       .insights {
+        width: 100%;
+        max-height: 45%;
+        top: auto;
         border-left: none;
         border-top: 1px solid var(--border);
-        max-height: 260px;
       }
-    }
-    .state {
-      position: absolute;
-      inset: 0;
-      display: none;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-      text-align: center;
-      z-index: 3;
-      background: color-mix(in srgb, var(--bg) 82%, transparent);
-    }
-    .card {
-      max-width: 420px;
-      padding: 24px 22px;
-      border-radius: 18px;
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      box-shadow: 0 20px 60px color-mix(in srgb, var(--text) 18%, transparent);
-    }
-    .card h2 {
-      margin: 0 0 10px;
-      font-size: 18px;
-    }
-    .card p {
-      margin: 0;
-      color: var(--muted);
-      line-height: 1.5;
-    }
-    .loading-dots {
-      display: inline-flex;
-      gap: 6px;
-      margin-top: 16px;
-    }
-    .loading-dots span {
-      width: 8px;
-      height: 8px;
-      border-radius: 999px;
-      background: var(--accent);
-      animation: bounce 1s infinite ease-in-out;
-    }
-    .loading-dots span:nth-child(2) { animation-delay: 0.12s; }
-    .loading-dots span:nth-child(3) { animation-delay: 0.24s; }
-    @keyframes bounce {
-      0%, 80%, 100% { transform: translateY(0); opacity: 0.5; }
-      40% { transform: translateY(-6px); opacity: 1; }
-    }
-    .state[data-state="loading"] { display: flex; }
-    .state[data-state="empty"] { display: flex; }
-    .state[data-state="error"] { display: flex; }
-    .state.error .card { border-color: color-mix(in srgb, var(--error) 65%, var(--border)); }
-    .state.empty .card { border-color: color-mix(in srgb, var(--warn) 65%, var(--border)); }
-    .hint {
-      margin-top: 14px;
-      display: inline-flex;
-      gap: 8px;
-      align-items: center;
-      color: var(--muted);
-      font-size: 12px;
-    }
-    .hint code {
-      padding: 2px 6px;
-      border-radius: 999px;
-      background: var(--badge-bg);
     }
   </style>
 </head>
-<body data-theme="light">
+<body data-theme="${hostThemeMode()}">
   <div class="shell">
     <div class="header">
-      <div class="left">
-        <div class="title-row">
-          <div>
-            <div class="title">NeverMIN Code Graph</div>
-            <div class="subtitle">Default: Mode Ringkas (file + relasi antar file). Pakai Mode Detail untuk symbol, atau Browser untuk layar penuh.</div>
-          </div>
-          <div class="badge" id="badge">${graph.nodes.length} node · ${graph.edges.length} edge</div>
-        </div>
-        <div class="legend-row">
-          <div class="legend" aria-label="Legenda relasi">
-            <span><i class="imports"></i>imports</span>
-            <span><i class="calls"></i>calls</span>
-            <span><i class="uses"></i>uses / JSX</span>
-            <span><i class="defines"></i>defines</span>
-            <span><i class="extends"></i>extends</span>
-          </div>
-          <div class="swatches" aria-label="Jenis node">
-            <span><i class="file"></i>file</span>
-            <span><i class="function"></i>function</span>
-            <span><i class="class"></i>class</span>
-            <span><i class="method"></i>method</span>
-            <span><i class="variable"></i>variable</span>
-          </div>
-        </div>
-        <div class="searchbar">
-          <input id="searchInput" type="search" placeholder="Cari file atau symbol..." aria-label="Cari file atau symbol" />
-          <button id="viewModeToggle" class="primary" type="button" title="Ganti tampilan ringkas/detail">Mode Detail</button>
-          <button id="fitView" class="primary" type="button" title="Tampilkan seluruh graph">View Utuh</button>
-          <button id="openExternal" class="primary" type="button" title="Buka graph di browser">Buka di Browser</button>
-          <button id="themeToggle" type="button" title="Ganti tema terang/gelap">Mode Gelap</button>
-        </div>
+      <div class="badge" id="badge">${escapeHtmlAttr(badgeLabel)}</div>
+      <div class="seg" role="group" aria-label="${escapeHtmlAttr(t('webview.flow'))}">
+        <button type="button" data-view="modules">${escapeHtmlAttr(t('webview.modules'))}</button>
+        <button type="button" data-view="flow">${escapeHtmlAttr(t('webview.flow'))}</button>
+        <button type="button" data-view="functions">${escapeHtmlAttr(t('webview.functions'))}</button>
       </div>
+      <button type="button" class="ghost" id="insightsToggle">${escapeHtmlAttr(t('webview.insights'))}</button>
+      <button type="button" class="ghost" id="copySource">${escapeHtmlAttr(t('webview.copyMermaid'))}</button>
+      <button type="button" class="ghost" id="openSource">${escapeHtmlAttr(t('webview.openSource'))}</button>
+      <button type="button" class="ghost" id="themeToggle">${escapeHtmlAttr(t('webview.theme'))}</button>
+      <button type="button" class="primary" id="openFlow">${escapeHtmlAttr(t('webview.fullFlow'))}</button>
+      <button type="button" class="ghost" id="openMindMap">${escapeHtmlAttr(t('webview.mindMap'))}</button>
     </div>
-    <div class="content">
-      <div class="graph-area">
-        <div class="zoom-toolbar" id="zoomToolbar">
-          <button type="button" id="zoomIn" title="Zoom in">+</button>
-          <button type="button" id="zoomOut" title="Zoom out">−</button>
-          <button type="button" id="zoomFit" title="Fit">⤢</button>
+    <div class="content insights-collapsed" id="contentShell">
+      <div class="canvas-wrap">
+        <div class="zoom-bar" aria-label="Zoom">
+          <button type="button" id="zoomOut" title="Zoom out (−)">−</button>
+          <span id="zoomLabel">100%</span>
+          <button type="button" id="zoomIn" title="Zoom in (+)">+</button>
+          <button type="button" id="zoomFit" title="Fit diagram">Fit</button>
+          <button type="button" id="zoomReset" title="Reset 100%">1:1</button>
+          <span class="hint">${escapeHtmlAttr(t('webview.zoomHint'))}</span>
         </div>
-        <div id="graph"></div>
-      </div>
-      <aside class="insights" id="insightsPanel">
-        <h2>Insights</h2>
-        <div class="muted md-body" id="insightsSummary">Jalankan analisis untuk melihat entry point, hub, dan alur utama dari graph.</div>
-        <h3>Detail node</h3>
-        <div class="node-detail empty" id="nodeDetail"><span class="placeholder">Klik node di graph untuk melihat nama, jenis, file, dan baris.</span></div>
-        <h3>Flow utama</h3>
-        <div class="flow-list" id="mainFlowList"></div>
-        <h3>Key flows</h3>
-        <div class="flow-list" id="flowList"></div>
-        <h3>Entry points</h3>
-        <div class="insight-list" id="entryList"></div>
-        <h3>Hubs</h3>
-        <div class="insight-list" id="hubList"></div>
-        <h3>Statistik</h3>
-        <div class="stats-grid" id="statsGrid">
-          <div class="stat-card"><span class="stat-icon nodes">N</span><div><strong id="statNodes">0</strong><small>Nodes</small></div></div>
-          <div class="stat-card"><span class="stat-icon edges">E</span><div><strong id="statEdges">0</strong><small>Edges</small></div></div>
-          <div class="stat-card"><span class="stat-icon files">F</span><div><strong id="statFiles">0</strong><small>Files</small></div></div>
-          <div class="stat-card"><span class="stat-icon functions">ƒ</span><div><strong id="statFunctions">0</strong><small>Functions</small></div></div>
-        </div>
-        <div class="tip-box">Tip: Default Mode Ringkas = file + import antar file. Klik Mode Detail untuk lihat function/symbol. Scroll zoom, drag pan.</div>
-      </aside>
-      <div class="state" id="loadingState" data-state="loading">
-        <div class="card">
-          <h2>Menyiapkan graph</h2>
-          <p id="loadingMessage">Memuat data dan merender relasi antar symbol.</p>
-          <div class="loading-dots" aria-hidden="true">
-            <span></span><span></span><span></span>
+        <div class="viewport-host" id="viewportHost">
+          <div class="viewport" id="viewport">
+            <div id="diagram"></div>
           </div>
         </div>
-      </div>
-      <div class="state empty" id="emptyState" data-state="empty">
-        <div class="card">
-          <h2>Graph belum punya node</h2>
-          <p id="emptyMessage">Jalankan analisis repo atau buka workspace yang berisi symbol agar graph bisa ditampilkan.</p>
-          <div class="hint"><code>nevermin.analyzeRepo</code> untuk membangun ringkasan graph.</div>
+        <pre class="source" id="sourcePreview" hidden></pre>
+        <div class="state${initialState === 'loading' ? ' is-active' : ''}" id="loadingState">
+          <div class="card"><h2>${escapeHtmlAttr(t('webview.loadingTitle'))}</h2><p id="loadingMessage">${escapeHtmlAttr(initialMessage && initialState === 'loading' ? initialMessage : t('webview.loadingBody'))}</p></div>
+        </div>
+        <div class="state${initialState === 'empty' ? ' is-active' : ''}" id="emptyState">
+          <div class="card"><h2>${escapeHtmlAttr(t('webview.emptyTitle'))}</h2><p id="emptyMessage">${escapeHtmlAttr(initialMessage && initialState === 'empty' ? initialMessage : t('webview.emptyBody'))}</p></div>
+        </div>
+        <div class="state${initialState === 'error' ? ' is-active' : ''}" id="errorState">
+          <div class="card"><h2>${escapeHtmlAttr(t('webview.errorTitle'))}</h2><p id="errorMessage">${escapeHtmlAttr(initialMessage && initialState === 'error' ? initialMessage : t('webview.errorBody'))}</p></div>
         </div>
       </div>
-      <div class="state error" id="errorState" data-state="error">
-        <div class="card">
-          <h2>Graph gagal dimuat</h2>
-          <p id="errorMessage">Ada masalah saat merender graph.</p>
+      <aside class="insights" id="insightsPane">
+        <h2>${escapeHtmlAttr(t('webview.insightsTitle'))}</h2>
+        <h3>${escapeHtmlAttr(t('webview.purposeHeading'))}</h3>
+        <div class="md-body" id="insightsPurpose">${escapeHtmlAttr(t('webview.noInsightsPurpose'))}</div>
+        <h3>${escapeHtmlAttr(t('webview.summaryHeading'))}</h3>
+        <div class="md-body" id="insightsSummary">${escapeHtmlAttr(t('webview.noInsightsSummary'))}</div>
+        <h3>${escapeHtmlAttr(t('webview.mainFlowHeading'))}</h3>
+        <div class="stat" id="mainFlowCard">
+          <strong id="mainFlowTitle">${escapeHtmlAttr(t('webview.mainFlowEmpty'))}</strong>
+          <small id="mainFlowMeta">${escapeHtmlAttr(t('webview.mainFlowEmptyHint'))}</small>
+          <div class="chip-list" id="mainFlowStages"></div>
+          <button type="button" class="chip" id="openFlowInline" style="margin-top:8px;">${escapeHtmlAttr(t('webview.openFullFlow'))}</button>
+          <button type="button" class="chip" id="openMindMapInline" style="margin-top:8px;">${escapeHtmlAttr(t('webview.openMindMap'))}</button>
         </div>
-      </div>
+        <h3>${escapeHtmlAttr(t('webview.entryHeading'))}</h3>
+        <div class="chip-list" id="entryList"></div>
+        <h3>${escapeHtmlAttr(t('webview.hubHeading'))}</h3>
+        <div class="chip-list" id="hubList"></div>
+        <h3>${escapeHtmlAttr(t('webview.statsHeading'))}</h3>
+        <div class="stat-row">
+          <div class="stat"><strong id="statFiles">0</strong><small>${escapeHtmlAttr(t('webview.statFiles'))}</small></div>
+          <div class="stat"><strong id="statEdges">0</strong><small>${escapeHtmlAttr(t('webview.statEdges'))}</small></div>
+          <div class="stat"><strong id="statTotal">0</strong><small>${escapeHtmlAttr(t('webview.statTotal'))}</small></div>
+          <div class="stat"><strong id="statNodes">0</strong><small>${escapeHtmlAttr(t('webview.statNodes'))}</small></div>
+        </div>
+        <p class="muted" id="truncateNote" hidden></p>
+      </aside>
     </div>
   </div>
   <script nonce="${nonce}">
+  const vscode = acquireVsCodeApi();
+  const bootStartedAt = Date.now();
+  let bootGeneration = 0;
+  function life(phase, detail) {
+    try {
+      vscode.postMessage({
+        type: 'webviewLife',
+        phase: phase,
+        detail: detail ? String(detail) : undefined,
+        generation: bootGeneration,
+        elapsedMs: Date.now() - bootStartedAt
+      });
+    } catch (_) {}
+  }
+  life('script-start');
+  try {
     ${MARKDOWN_LITE_WEBVIEW_SCRIPT}
-    ${getCytoscapeStyleBuilderScript()}
-    const THEMES = {
-      light: ${themeToJsObject(LIGHT_GRAPH_THEME)},
-      dark: ${themeToJsObject(DARK_GRAPH_THEME)}
-    };
-    let currentThemeMode = localStorage.getItem('nevermin.graphTheme') || 'light';
-    let currentTheme = THEMES[currentThemeMode] || THEMES.light;
-    if (!THEMES[currentThemeMode]) {
-      currentThemeMode = 'light';
-    }
+    const boot = ${payload};
+    const ui = boot.ui || {};
+    bootGeneration = boot.generation || 0;
+    life('boot-parsed', 'arch=' + ((boot.bundle && boot.bundle.architecture) || '').length + ' state=' + (boot.state || ''));
+    let bundle = boot.bundle;
+    let insights = boot.insights;
+    let view = boot.view || 'architecture';
+    let theme = boot.theme || 'dark';
+    let renderToken = 0;
+    let mermaidLoadPromise = null;
 
-    const vscode = acquireVsCodeApi();
-    let cy = null;
-    let currentGraph = ${graphPayload};
-    let currentInsights = ${insightsPayload};
-    let currentQuery = '';
-
+    const diagramEl = document.getElementById('diagram');
+    const viewport = document.getElementById('viewport');
+    const viewportHost = document.getElementById('viewportHost');
+    const zoomLabel = document.getElementById('zoomLabel');
     const loadingState = document.getElementById('loadingState');
     const emptyState = document.getElementById('emptyState');
     const errorState = document.getElementById('errorState');
-    const graphEl = document.getElementById('graph');
-    const badge = document.getElementById('badge');
-    const searchInput = document.getElementById('searchInput');
-    const fitViewBtn = document.getElementById('fitView');
-    const viewModeToggle = document.getElementById('viewModeToggle');
-    const openExternalBtn = document.getElementById('openExternal');
-    const themeToggle = document.getElementById('themeToggle');
-    const zoomInBtn = document.getElementById('zoomIn');
-    const zoomOutBtn = document.getElementById('zoomOut');
-    const zoomFitBtn = document.getElementById('zoomFit');
-    const insightsSummary = document.getElementById('insightsSummary');
-    const nodeDetail = document.getElementById('nodeDetail');
-    const entryList = document.getElementById('entryList');
-    const hubList = document.getElementById('hubList');
-    const mainFlowList = document.getElementById('mainFlowList');
-    const flowList = document.getElementById('flowList');
-    const statNodes = document.getElementById('statNodes');
-    const statEdges = document.getElementById('statEdges');
-    const statFiles = document.getElementById('statFiles');
-    const statFunctions = document.getElementById('statFunctions');
     const loadingMessage = document.getElementById('loadingMessage');
     const emptyMessage = document.getElementById('emptyMessage');
     const errorMessage = document.getElementById('errorMessage');
-    const LABEL_ZOOM_THRESHOLD = 0.85;
-    const FLOW_BORDER_KINDS = ['imports', 'calls', 'uses'];
-    let viewMode = localStorage.getItem('nevermin.graphViewMode') || 'overview';
-    if (viewMode !== 'overview' && viewMode !== 'detail') {
-      viewMode = 'overview';
+    const badge = document.getElementById('badge');
+    const insightsSummary = document.getElementById('insightsSummary');
+    const insightsPurpose = document.getElementById('insightsPurpose');
+    const mainFlowTitle = document.getElementById('mainFlowTitle');
+    const mainFlowMeta = document.getElementById('mainFlowMeta');
+    const mainFlowStages = document.getElementById('mainFlowStages');
+    const openFlowInline = document.getElementById('openFlowInline');
+    const openMindMapInline = document.getElementById('openMindMapInline');
+    const entryList = document.getElementById('entryList');
+    const hubList = document.getElementById('hubList');
+    const contentShell = document.getElementById('contentShell');
+    const sourcePreview = document.getElementById('sourcePreview');
+
+    let scale = 1;
+    let panX = 0;
+    let panY = 0;
+    let isPanning = false;
+    let panMoved = false;
+    let startX = 0;
+    let startY = 0;
+    let originX = 0;
+    let originY = 0;
+    let baseSvgWidth = 0;
+    let baseSvgHeight = 0;
+
+    function currentSvg() {
+      return diagramEl.querySelector('svg');
     }
 
-    function updateThemeToggleLabel() {
-      if (!themeToggle) {
-        return;
-      }
-      themeToggle.textContent = currentThemeMode === 'light' ? 'Mode Gelap' : 'Mode Terang';
-    }
-
-    function updateViewModeToggleLabel() {
-      if (!viewModeToggle) {
-        return;
-      }
-      // Tombol menunjukkan mode berikutnya
-      viewModeToggle.textContent = viewMode === 'overview' ? 'Mode Detail' : 'Mode Ringkas';
-    }
-
-    applyThemeToDocument(currentTheme);
-    updateThemeToggleLabel();
-    updateViewModeToggleLabel();
-
-    function setState(nextState, message) {
-      loadingState.style.display = nextState === 'loading' ? 'flex' : 'none';
-      emptyState.style.display = nextState === 'empty' ? 'flex' : 'none';
-      errorState.style.display = nextState === 'error' ? 'flex' : 'none';
-      graphEl.style.display = nextState === 'ready' ? 'block' : 'none';
-
-      if (message) {
-        if (nextState === 'loading') {
-          loadingMessage.textContent = message;
-        } else if (nextState === 'empty') {
-          emptyMessage.textContent = message;
-        } else if (nextState === 'error') {
-          errorMessage.textContent = message;
-        }
-      }
-    }
-
-    function destroyGraph() {
-      if (cy) {
-        cy.destroy();
-        cy = null;
-      }
-    }
-
-    function escapeHtml(value) {
-      return String(value)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-    }
-
-    function fillNodeDetail(data) {
-      if (!nodeDetail || !data) {
-        return;
-      }
-      nodeDetail.classList.remove('empty');
-      nodeDetail.innerHTML =
-        '<dl>' +
-          '<dt>Nama</dt><dd>' + escapeHtml(data.label || data.id || 'Node') + '</dd>' +
-          '<dt>Jenis</dt><dd>' + escapeHtml(data.kind || '-') + '</dd>' +
-          '<dt>File</dt><dd>' + escapeHtml(data.filePath || '-') + '</dd>' +
-          '<dt>Baris</dt><dd>' + escapeHtml(String(data.startLine || '-') + ' – ' + String(data.endLine || '-')) + '</dd>' +
-        '</dl>';
-    }
-
-    function resetNodeDetail() {
-      if (!nodeDetail) {
-        return;
-      }
-      nodeDetail.classList.add('empty');
-      nodeDetail.innerHTML = '<span class="placeholder">Klik node di graph untuk melihat nama, jenis, file, dan baris.</span>';
-    }
-
-    function focusNodes(nodeIds) {
-      if (!cy || !Array.isArray(nodeIds) || nodeIds.length === 0) {
-        return;
-      }
-
-      // Insights sering merujuk symbol — buka detail sementara agar node terlihat
-      const needsDetail = nodeIds.some((id) => {
-        const node = cy.getElementById(id);
-        return node.nonempty() && node.data('kind') !== 'file';
-      });
-      if (needsDetail && viewMode === 'overview') {
-        viewMode = 'detail';
+    function captureSvgBaseSize(svg) {
+      // Simpan ukuran intrinsik sekali; zoom mengubah width/height (vektor tetap tajam)
+      const widthAttr = svg.getAttribute('width');
+      const heightAttr = svg.getAttribute('height');
+      let w = widthAttr ? parseFloat(widthAttr) : NaN;
+      let h = heightAttr ? parseFloat(heightAttr) : NaN;
+      if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
         try {
-          localStorage.setItem('nevermin.graphViewMode', viewMode);
+          const bbox = svg.getBBox();
+          w = bbox.width || svg.clientWidth || 800;
+          h = bbox.height || svg.clientHeight || 600;
+        } catch (_) {
+          w = svg.clientWidth || 800;
+          h = svg.clientHeight || 600;
+        }
+      }
+      baseSvgWidth = w;
+      baseSvgHeight = h;
+      svg.removeAttribute('style');
+      svg.setAttribute('width', String(w));
+      svg.setAttribute('height', String(h));
+    }
+
+    function applyTransform() {
+      // Hanya translate untuk pan — scale lewat atribut SVG agar tidak buram
+      viewport.style.transform = 'translate(' + Math.round(panX) + 'px,' + Math.round(panY) + 'px)';
+      zoomLabel.textContent = Math.round(scale * 100) + '%';
+      const svg = currentSvg();
+      if (svg && baseSvgWidth > 0 && baseSvgHeight > 0) {
+        svg.setAttribute('width', String(Math.max(40, baseSvgWidth * scale)));
+        svg.setAttribute('height', String(Math.max(40, baseSvgHeight * scale)));
+      }
+    }
+
+    function setZoom(next, anchorX, anchorY) {
+      const prev = scale;
+      scale = Math.min(3.5, Math.max(0.35, next));
+      if (typeof anchorX === 'number' && typeof anchorY === 'number' && prev > 0) {
+        const ratio = scale / prev;
+        panX = anchorX - (anchorX - panX) * ratio;
+        panY = anchorY - (anchorY - panY) * ratio;
+      }
+      applyTransform();
+    }
+
+    function zoomBy(factor) {
+      const rect = viewportHost.getBoundingClientRect();
+      setZoom(scale * factor, rect.width / 2, rect.height / 2);
+    }
+
+    function fitDiagram() {
+      const svg = currentSvg();
+      if (!svg) {
+        scale = 1; panX = 0; panY = 0; applyTransform();
+        return;
+      }
+      if (!baseSvgWidth || !baseSvgHeight) {
+        captureSvgBaseSize(svg);
+      }
+      const hostRect = viewportHost.getBoundingClientRect();
+      const pad = 56;
+      const availW = Math.max(120, hostRect.width - pad);
+      const availH = Math.max(120, hostRect.height - pad);
+      const next = Math.min(availW / baseSvgWidth, availH / baseSvgHeight, 1.35);
+      scale = Math.max(0.35, Math.min(2.2, next));
+      panX = Math.round((hostRect.width - baseSvgWidth * scale) / 2);
+      panY = Math.round((hostRect.height - baseSvgHeight * scale) / 2);
+      applyTransform();
+    }
+
+    function resetZoom() {
+      scale = 1;
+      panX = 24;
+      panY = 24;
+      applyTransform();
+    }
+
+    function setState(next, message) {
+      loadingState.classList.toggle('is-active', next === 'loading');
+      emptyState.classList.toggle('is-active', next === 'empty');
+      errorState.classList.toggle('is-active', next === 'error');
+      diagramEl.style.opacity = next === 'ready' ? '1' : '0.35';
+      if (message) {
+        if (next === 'loading') loadingMessage.textContent = message;
+        if (next === 'empty') emptyMessage.textContent = message;
+        if (next === 'error') errorMessage.textContent = message;
+      }
+    }
+
+    function currentSource() {
+      if (!bundle) return '';
+      if (view === 'modules') return bundle.modules || '';
+      if (view === 'flow') return bundle.flow || '';
+      if (view === 'functions') return bundle.functions || '';
+      return bundle.architecture || '';
+    }
+
+    function sourceWithClicks(source) {
+      // Jangan sisipkan click directive Mermaid — sering bikin parse gagal.
+      // Klik node di-handle lewat wireSvgClicks pada SVG.
+      return source;
+    }
+
+    function loadMermaidLibrary() {
+      if (window.mermaid) {
+        return Promise.resolve(true);
+      }
+      if (mermaidLoadPromise) {
+        return mermaidLoadPromise;
+      }
+      const src = boot.mermaidUri;
+      if (!src) {
+        life('mermaid-missing-uri');
+        return Promise.resolve(false);
+      }
+      life('mermaid-load-start', src.slice(-48));
+      mermaidLoadPromise = new Promise((resolve) => {
+        const script = document.createElement('script');
+        script.src = src;
+        if (boot.scriptNonce) {
+          script.setAttribute('nonce', boot.scriptNonce);
+        }
+        script.onload = () => {
+          life('mermaid-load-ok', window.mermaid ? 'defined' : 'undefined-after-load');
+          resolve(!!window.mermaid);
+        };
+        script.onerror = () => {
+          life('mermaid-load-error', src.slice(-64));
+          resolve(false);
+        };
+        document.head.appendChild(script);
+      });
+      return mermaidLoadPromise;
+    }
+
+    async function renderDiagram() {
+      const token = ++renderToken;
+      const source = currentSource();
+      sourcePreview.textContent = source;
+      updateViewButtons();
+      renderStats();
+
+      function report(ok, detail) {
+        try {
+          vscode.postMessage({
+            type: 'renderStatus',
+            ok: !!ok,
+            detail: String(detail || ''),
+            view: view
+          });
         } catch (_) {}
-        updateViewModeToggleLabel();
-        runClusterLayout();
-        applySearchFilter({ fit: false });
       }
 
-      const targets = cy.nodes().filter((node) => nodeIds.includes(node.id()));
-      if (targets.empty()) {
+      if (!bundle || !source.trim()) {
+        setState('empty', ui['webview.noMermaid'] || 'Belum ada konten Mermaid.');
+        diagramEl.innerHTML = '';
+        sourcePreview.hidden = false;
+        report(false, 'sumber Mermaid kosong');
         return;
       }
 
-      cy.elements().unselect();
-      targets.select();
-      targets.removeClass('cy-hide-label cy-node-hidden');
-      cy.fit(targets, 80);
-    }
+      setState('ready');
+      diagramEl.innerHTML = '<p class="muted">' + (ui['webview.rendering'] || 'Merender…') + '</p>';
 
-    function renderInsightButtons(container, items, kind) {
-      if (!container) {
-        return;
-      }
-
-      container.innerHTML = '';
-      if (!items || items.length === 0) {
-        const empty = document.createElement('p');
-        empty.className = 'muted';
-        empty.textContent = 'Belum terdeteksi.';
-        container.appendChild(empty);
-        return;
-      }
-
-      items.forEach((item) => {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = kind === 'flow'
-          ? 'flow-card flow-' + FLOW_BORDER_KINDS[container.children.length % FLOW_BORDER_KINDS.length]
-          : 'insight-item';
-        button.innerHTML = '<strong></strong><small></small>';
-        if (kind === 'flow') {
-          const processText = Array.isArray(item.process) && item.process.length
-            ? item.process.join(' → ')
-            : '';
-          button.querySelector('strong').textContent = (item.input && item.output)
-            ? ('Input: ' + item.input + ' → Output: ' + item.output)
-            : (item.label || 'Flow');
-          button.querySelector('small').textContent = processText
-            ? ('Proses: ' + processText)
-            : (item.steps || []).join(' → ');
-        } else {
-          button.querySelector('strong').textContent = item.name;
-          button.querySelector('small').textContent = item.reason || item.filePath || '';
-        }
-        button.addEventListener('click', () => {
-          container.querySelectorAll('button').forEach((el) => el.classList.remove('active'));
-          button.classList.add('active');
-          if (kind === 'flow') {
-            focusNodes(item.nodeIds || []);
-          } else {
-            focusNodes([item.id]);
-          }
-        });
-        container.appendChild(button);
-      });
-    }
-
-    function renderStats(insights) {
-      const stats = insights && insights.stats ? insights.stats : null;
-      const nodeCount = stats ? stats.nodeCount : (currentGraph.nodes || []).length;
-      const edgeCount = stats ? stats.edgeCount : (currentGraph.edges || []).length;
-      const fileCount = stats && stats.nodesByKind ? (stats.nodesByKind.file || 0) : 0;
-      const functionCount = stats && stats.nodesByKind ? (stats.nodesByKind.function || 0) : 0;
-      if (statNodes) statNodes.textContent = String(nodeCount);
-      if (statEdges) statEdges.textContent = String(edgeCount);
-      if (statFiles) statFiles.textContent = String(fileCount);
-      if (statFunctions) statFunctions.textContent = String(functionCount);
-    }
-
-    function renderInsights(insights) {
-      currentInsights = insights;
-      if (!insights) {
-        if (insightsSummary) {
-          insightsSummary.className = 'muted md-body';
-          insightsSummary.textContent = 'Jalankan analisis untuk melihat entry point, hub, dan alur utama dari graph.';
-        }
-        renderInsightButtons(entryList, [], 'ref');
-        renderInsightButtons(hubList, [], 'ref');
-        renderInsightButtons(mainFlowList, [], 'flow');
-        renderInsightButtons(flowList, [], 'flow');
-        renderStats(null);
-        return;
-      }
-
-      if (insightsSummary) {
-        const markdownSource = insights.narrative
-          || (insights.summaryBullets || []).map((bullet) => '- ' + bullet).join('\\n')
-          || 'Insights struktural siap. Klik item untuk fokus ke node.';
-        insightsSummary.className = 'md-body';
-        insightsSummary.innerHTML = renderMarkdownLite(markdownSource);
-      }
-      renderInsightButtons(entryList, insights.entryPoints || [], 'ref');
-      renderInsightButtons(hubList, insights.hubs || [], 'ref');
-      renderInsightButtons(mainFlowList, insights.mainFlow ? [insights.mainFlow] : [], 'flow');
-      renderInsightButtons(flowList, insights.keyFlows || [], 'flow');
-      renderStats(insights);
-    }
-
-    function fitGraph(padding) {
-      if (!cy) {
-        return;
-      }
-
-      cy.resize();
-      const visible = cy.nodes(':visible');
-      if (visible.length > 0) {
-        cy.fit(visible, padding ?? 56);
-      } else {
-        cy.fit(undefined, padding ?? 56);
-      }
-    }
-
-    function updateLabelVisibility() {
-      if (!cy) {
-        return;
-      }
-
-      const zoom = cy.zoom();
-      const showSymbols = viewMode === 'detail' && (zoom >= LABEL_ZOOM_THRESHOLD || Boolean(currentQuery.trim()));
-      cy.batch(() => {
-        cy.nodes().forEach((node) => {
-          if (node.data('kind') === 'file') {
-            node.removeClass('cy-hide-label');
-            return;
-          }
-
-          if (showSymbols || node.hasClass('cy-node-match') || node.grabbed()) {
-            node.removeClass('cy-hide-label');
-          } else {
-            node.addClass('cy-hide-label');
-          }
-        });
-      });
-    }
-
-    function clearOverviewEdges() {
-      if (!cy) {
-        return;
-      }
-      cy.edges('.cy-overview-edge').remove();
-    }
-
-    function rebuildOverviewEdges() {
-      if (!cy) {
-        return;
-      }
-
-      clearOverviewEdges();
-      if (viewMode !== 'overview') {
-        return;
-      }
-      const fileByPath = new Map();
-      cy.nodes().forEach((node) => {
-        if (node.data('kind') !== 'file') {
-          return;
-        }
-        fileByPath.set(String(node.data('filePath') || node.id()), node.id());
-      });
-
-      const seen = new Set();
-      const additions = [];
-      cy.edges().forEach((edge) => {
-        if (edge.hasClass('cy-overview-edge')) {
-          return;
-        }
-        const kind = String(edge.data('label') || '');
-        if (kind === 'defines') {
-          return;
-        }
-        const sourcePath = String(edge.source().data('filePath') || '');
-        const targetPath = String(edge.target().data('filePath') || '');
-        if (!sourcePath || !targetPath || sourcePath === targetPath) {
-          return;
-        }
-        const sourceFileId = fileByPath.get(sourcePath);
-        const targetFileId = fileByPath.get(targetPath);
-        if (!sourceFileId || !targetFileId) {
-          return;
-        }
-        const key = sourceFileId + '->' + targetFileId + ':' + kind;
-        if (seen.has(key)) {
-          return;
-        }
-        seen.add(key);
-        additions.push({
-          group: 'edges',
-          data: {
-            id: 'ov-' + key,
-            source: sourceFileId,
-            target: targetFileId,
-            label: kind
-          },
-          classes: 'cy-overview-edge'
-        });
-      });
-
-      if (additions.length > 0) {
-        cy.add(additions);
-      }
-    }
-
-    function applyViewModeClasses() {
-      if (!cy) {
-        return;
-      }
-
-      cy.batch(() => {
-        cy.nodes().removeClass('cy-node-hidden');
-        cy.edges().removeClass('cy-edge-hidden');
-
-        if (viewMode === 'overview') {
-          cy.nodes().forEach((node) => {
-            if (node.data('kind') !== 'file') {
-              node.addClass('cy-node-hidden');
-            }
-          });
-          cy.edges().forEach((edge) => {
-            if (!edge.hasClass('cy-overview-edge')) {
-              edge.addClass('cy-edge-hidden');
-            }
-          });
-        } else {
-          cy.edges('.cy-overview-edge').addClass('cy-edge-hidden');
-        }
-      });
-    }
-
-    /**
-     * Layout: file-connected cluster di atas, orphan file di bawah (grid rapat).
-     * Mode detail menaruh symbol di bawah masing-masing file.
-     */
-    function runClusterLayout() {
-      if (!cy) {
-        return;
-      }
-
-      rebuildOverviewEdges();
-      applyViewModeClasses();
-
-      const groups = new Map();
-      cy.nodes().forEach((node) => {
-        if (node.hasClass('cy-overview-edge')) {
-          return;
-        }
-        const filePath = String(node.data('filePath') || node.id());
-        if (!groups.has(filePath)) {
-          groups.set(filePath, { file: null, symbols: [], neighbors: new Set() });
-        }
-
-        const group = groups.get(filePath);
-        if (node.data('kind') === 'file') {
-          group.file = node;
-        } else {
-          group.symbols.push(node);
-        }
-      });
-
-      const neighborEdges = viewMode === 'overview'
-        ? cy.edges('.cy-overview-edge')
-        : cy.edges().filter((edge) => !edge.hasClass('cy-overview-edge') && String(edge.data('label')) !== 'defines');
-
-      neighborEdges.forEach((edge) => {
-        const sourcePath = String(edge.source().data('filePath') || '');
-        const targetPath = String(edge.target().data('filePath') || '');
-        if (!sourcePath || !targetPath || sourcePath === targetPath) {
-          return;
-        }
-
-        if (groups.has(sourcePath) && groups.has(targetPath)) {
-          groups.get(sourcePath).neighbors.add(targetPath);
-          groups.get(targetPath).neighbors.add(sourcePath);
-        }
-      });
-
-      const entries = Array.from(groups.entries()).sort((left, right) => {
-        const leftScore = right[1].neighbors.size - left[1].neighbors.size;
-        if (leftScore !== 0) {
-          return leftScore;
-        }
-        return left[0].localeCompare(right[0]);
-      });
-
-      const placed = new Map();
-      const order = [];
-      const visit = (filePath) => {
-        if (placed.has(filePath)) {
-          return;
-        }
-        placed.set(filePath, true);
-        order.push(filePath);
-        const neighbors = Array.from(groups.get(filePath)?.neighbors ?? []).sort();
-        for (const neighbor of neighbors) {
-          visit(neighbor);
-        }
-      };
-
-      for (const [filePath] of entries) {
-        visit(filePath);
-      }
-
-      const connected = order.filter((filePath) => (groups.get(filePath)?.neighbors.size || 0) > 0);
-      const isolated = order.filter((filePath) => (groups.get(filePath)?.neighbors.size || 0) === 0);
-      const isOverview = viewMode === 'overview';
-      const connectedCols = Math.max(2, Math.ceil(Math.sqrt(Math.max(connected.length, 1) * 1.15)));
-      const maxSymbols = Math.max(1, ...order.map((filePath) => groups.get(filePath).symbols.length));
-      const symbolCols = Math.min(3, Math.max(2, Math.ceil(Math.sqrt(maxSymbols))));
-      const symbolRows = Math.max(1, Math.ceil(maxSymbols / symbolCols));
-      const cellW = isOverview ? 168 : Math.max(190, 100 + symbolCols * 72);
-      const cellH = isOverview ? 92 : Math.max(120, 56 + symbolRows * 34);
-      const isoCols = Math.max(4, Math.ceil(Math.sqrt(Math.max(isolated.length, 1) * 1.8)));
-      const isoCellW = isOverview ? 148 : 168;
-      const isoCellH = isOverview ? 70 : Math.max(100, 48 + symbolRows * 30);
-
-      cy.batch(() => {
-        connected.forEach((filePath, index) => {
-          const group = groups.get(filePath);
-          const col = index % connectedCols;
-          const row = Math.floor(index / connectedCols);
-          const originX = col * cellW;
-          const originY = row * cellH;
-          const fileX = originX + cellW / 2;
-          const fileY = isOverview ? originY + cellH / 2 : originY + 22;
-
-          if (group.file) {
-            group.file.position({ x: fileX, y: fileY });
-          }
-
-          if (!isOverview) {
-            group.symbols
-              .slice()
-              .sort((left, right) => String(left.data('label')).localeCompare(String(right.data('label'))))
-              .forEach((symbol, symbolIndex) => {
-                const sc = symbolIndex % symbolCols;
-                const sr = Math.floor(symbolIndex / symbolCols);
-                symbol.position({
-                  x: originX + 42 + sc * 68,
-                  y: originY + 58 + sr * 32
-                });
-              });
-          }
-        });
-
-        const connectedRows = Math.max(1, Math.ceil(connected.length / connectedCols));
-        const isolatedOriginY = connected.length > 0 ? connectedRows * cellH + 56 : 0;
-
-        isolated.forEach((filePath, index) => {
-          const group = groups.get(filePath);
-          const col = index % isoCols;
-          const row = Math.floor(index / isoCols);
-          const originX = col * isoCellW;
-          const originY = isolatedOriginY + row * isoCellH;
-          const fileX = originX + isoCellW / 2;
-          const fileY = isOverview ? originY + isoCellH / 2 : originY + 20;
-
-          if (group.file) {
-            group.file.position({ x: fileX, y: fileY });
-          }
-
-          if (!isOverview) {
-            group.symbols
-              .slice()
-              .sort((left, right) => String(left.data('label')).localeCompare(String(right.data('label'))))
-              .forEach((symbol, symbolIndex) => {
-                const sc = symbolIndex % symbolCols;
-                const sr = Math.floor(symbolIndex / symbolCols);
-                symbol.position({
-                  x: originX + 36 + sc * 64,
-                  y: originY + 52 + sr * 30
-                });
-              });
-          } else {
-            // Keep symbols parked near their file (hidden) so detail toggle doesn't jump wildly
-            group.symbols.forEach((symbol, symbolIndex) => {
-              symbol.position({
-                x: fileX + (symbolIndex % 3) * 8,
-                y: fileY + 40 + Math.floor(symbolIndex / 3) * 8
-              });
-            });
-          }
-        });
-
-        // Park symbols for connected files in overview too
-        if (isOverview) {
-          connected.forEach((filePath) => {
-            const group = groups.get(filePath);
-            if (!group.file) {
-              return;
-            }
-            const pos = group.file.position();
-            group.symbols.forEach((symbol, symbolIndex) => {
-              symbol.position({
-                x: pos.x + (symbolIndex % 3) * 8,
-                y: pos.y + 40 + Math.floor(symbolIndex / 3) * 8
-              });
-            });
-          });
-        }
-      });
-
-      updateLabelVisibility();
-      fitGraph(72);
-    }
-
-    window.addEventListener('resize', () => fitGraph(64));
-
-    function updateBadge(graphData) {
-      if (!badge || !graphData) {
-        return;
-      }
-
-      const nodeCount = Array.isArray(graphData.nodes) ? graphData.nodes.length : 0;
-      const edgeCount = Array.isArray(graphData.edges) ? graphData.edges.length : 0;
-      if (currentQuery.trim()) {
-        const visibleCount = cy ? cy.nodes(':visible').length : nodeCount;
-        badge.textContent = visibleCount + ' / ' + nodeCount + ' node · ' + edgeCount + ' edge';
-        return;
-      }
-
-      badge.textContent = nodeCount + ' node · ' + edgeCount + ' edge';
-    }
-
-    function normalizeText(value) {
-      return String(value ?? '').toLowerCase().trim();
-    }
-
-    function nodeSearchText(node) {
-      return normalizeText([
-        node.data('label'),
-        node.data('kind'),
-        node.data('filePath'),
-        node.data('id')
-      ].join(' '));
-    }
-
-    function applySearchFilter(options) {
-      if (!cy) {
-        return;
-      }
-
-      const shouldFit = !options || options.fit !== false;
-      const query = normalizeText(currentQuery);
-      const allNodes = cy.nodes();
-      const allEdges = cy.edges();
-
-      allNodes.removeClass('cy-node-hidden cy-node-match');
-      allEdges.removeClass('cy-edge-hidden');
-      applyViewModeClasses();
-
-      if (!query) {
-        updateBadge(currentGraph);
-        updateLabelVisibility();
-        if (shouldFit) {
-          fitGraph(64);
-        }
-        return;
-      }
-
-      const matchedIds = new Set();
-      const visibleIds = new Set();
-
-      allNodes.forEach((node) => {
-        if (node.hasClass('cy-overview-edge')) {
-          return;
-        }
-        const text = nodeSearchText(node);
-        const match = text.includes(query);
-        if (!match) {
-          return;
-        }
-
-        matchedIds.add(node.id());
-        visibleIds.add(node.id());
-        node.addClass('cy-node-match');
-        node.removeClass('cy-node-hidden');
-
-        const filePath = String(node.data('filePath') || '');
-        if (filePath) {
-          allNodes.forEach((candidate) => {
-            if (candidate.data('kind') === 'file' && String(candidate.data('filePath') || candidate.id()) === filePath) {
-              visibleIds.add(candidate.id());
-              candidate.removeClass('cy-node-hidden');
-            }
-            if (viewMode === 'detail' && String(candidate.data('filePath') || '') === filePath) {
-              visibleIds.add(candidate.id());
-              candidate.removeClass('cy-node-hidden');
-            }
-          });
-        }
-      });
-
-      allNodes.forEach((node) => {
-        if (visibleIds.has(node.id())) {
-          return;
-        }
-
-        node.addClass('cy-node-hidden');
-      });
-
-      allEdges.forEach((edge) => {
-        if (viewMode === 'overview' && !edge.hasClass('cy-overview-edge')) {
-          edge.addClass('cy-edge-hidden');
-          return;
-        }
-        if (viewMode === 'detail' && edge.hasClass('cy-overview-edge')) {
-          edge.addClass('cy-edge-hidden');
-          return;
-        }
-        if (visibleIds.has(edge.source().id()) && visibleIds.has(edge.target().id())) {
-          return;
-        }
-
-        edge.addClass('cy-edge-hidden');
-      });
-
-      updateBadge(currentGraph);
-      updateLabelVisibility();
-      if (shouldFit) {
-        fitGraph(72);
-      }
-    }
-
-    function renderGraph(graphData, preferredState, message) {
-      destroyGraph();
-      currentGraph = graphData;
-      updateBadge(graphData);
-
-      if (preferredState === 'loading') {
-        setState('loading', message || 'Memproses analisis repo...');
-        return;
-      }
-
-      if (!window.cytoscape) {
-        setState('error', 'Cytoscape library tidak tersedia di webview.');
-        return;
-      }
-
-      if (!graphData.nodes || graphData.nodes.length === 0) {
-        setState('empty', message || 'Belum ada node untuk ditampilkan.');
+      const mermaidOk = await loadMermaidLibrary();
+      if (token !== renderToken) return;
+      if (!mermaidOk || !window.mermaid) {
+        setState('error', ui['webview.mermaidMissing'] || 'Library Mermaid tidak tersedia di webview. Cek CSP / path mermaid.min.js.');
+        sourcePreview.hidden = false;
+        report(false, 'window.mermaid undefined');
         return;
       }
 
       try {
-        setState('ready');
-        currentGraph = graphData;
-        cy = window.cytoscape({
-          container: graphEl,
-          elements: [...graphData.nodes, ...graphData.edges],
-          layout: { name: 'preset' },
-          minZoom: 0.15,
-          maxZoom: 2.8,
-          wheelSensitivity: 0.35,
-          style: buildCytoscapeStyles(currentTheme)
+        window.mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: 'loose',
+          theme: theme === 'dark' ? 'dark' : 'default',
+          flowchart: {
+            curve: 'basis',
+            htmlLabels: true,
+            padding: 16,
+            nodeSpacing: 36,
+            rankSpacing: 48,
+            diagramPadding: 16
+          }
         });
-
-        cy.on('tap', 'node', (evt) => {
-          const data = evt.target.data();
-          fillNodeDetail(data);
-          const nodeId = typeof data?.id === 'string' ? data.id : '';
-          const filePath = typeof data?.filePath === 'string' && data.filePath.trim().length > 0
-            ? data.filePath
-            : nodeId.includes('#')
-              ? nodeId.split('#')[0]
-              : nodeId;
-
-          vscode.postMessage({
-            type: 'nodeClick',
-            node: {
-              ...data,
-              filePath
+        const id = 'nm_' + Date.now() + '_' + token;
+        life('mermaid-render-start', 'chars=' + source.length);
+        const { svg } = await window.mermaid.render(id, sourceWithClicks(source));
+        if (token !== renderToken) return;
+        diagramEl.innerHTML = svg;
+        const svgEl = diagramEl.querySelector('svg');
+        if (svgEl) {
+          wireSvgClicks(svgEl);
+          captureSvgBaseSize(svgEl);
+          scale = 1;
+          panX = 24;
+          panY = 24;
+          requestAnimationFrame(() => fitDiagram());
+        }
+        life('mermaid-render-ok', 'svg=' + (svg ? svg.length : 0));
+        report(true, 'svg=' + (svg ? svg.length : 0) + 'char');
+      } catch (error) {
+        if (token !== renderToken) return;
+        console.warn('NeverMIN mermaid render error', error);
+        // Fallback: tanpa htmlLabels
+        try {
+          window.mermaid.initialize({
+            startOnLoad: false,
+            securityLevel: 'loose',
+            theme: theme === 'dark' ? 'dark' : 'default',
+            flowchart: {
+              curve: 'basis',
+              htmlLabels: false,
+              padding: 12,
+              nodeSpacing: 28,
+              rankSpacing: 40
             }
           });
-        });
-
-        cy.on('mouseover', 'node', (evt) => {
-          evt.target.removeClass('cy-hide-label');
-        });
-
-        cy.on('mouseout', 'node', () => {
-          updateLabelVisibility();
-        });
-
-        cy.on('zoom', () => {
-          updateLabelVisibility();
-        });
-
-        cy.ready(() => {
-          applySearchFilter({ fit: false });
-          runClusterLayout();
-        });
-      } catch (error) {
-        setState('error', error instanceof Error ? error.message : String(error));
+          const plainSource = source
+            .replace(/<br\\s*\\/?>/gi, ' - ')
+            .replace(/#amp;/g, 'and')
+            .replace(/#quot;/g, "'");
+          const id = 'nm_fallback_' + Date.now();
+          const { svg } = await window.mermaid.render(id, plainSource);
+          if (token !== renderToken) return;
+          diagramEl.innerHTML = svg;
+          const svgEl = diagramEl.querySelector('svg');
+          if (svgEl) {
+            wireSvgClicks(svgEl);
+            captureSvgBaseSize(svgEl);
+            requestAnimationFrame(() => fitDiagram());
+          }
+          setState('ready');
+          life('mermaid-render-fallback-ok');
+          report(true, 'fallback svg ok');
+        } catch (inner) {
+          const detail = inner instanceof Error ? inner.message : String(inner || error);
+          const failTpl = ui['webview.mermaidFail'] || 'Mermaid gagal dirender: {detail}';
+          setState('error', failTpl.replace('{detail}', detail));
+          sourcePreview.hidden = false;
+          life('mermaid-render-fail', detail);
+          report(false, detail);
+        }
       }
     }
+
+    function updateViewButtons() {
+      document.querySelectorAll('[data-view]').forEach((btn) => {
+        btn.classList.toggle('active', btn.getAttribute('data-view') === view);
+      });
+    }
+
+    function applyTheme() {
+      document.body.setAttribute('data-theme', theme);
+      document.getElementById('themeToggle').textContent =
+        theme === 'dark'
+          ? (ui['webview.themeLight'] || 'Terang')
+          : (ui['webview.themeDark'] || 'Gelap');
+    }
+
+    function openNode(meta) {
+      if (!meta || !meta.filePath) return;
+      vscode.postMessage({ type: 'nodeClick', node: meta });
+    }
+
+    window.neverminOpen = function(mermaidId) {
+      const index = (bundle && bundle.nodeIndex) || {};
+      openNode(index[mermaidId]);
+    };
+
+    function renderChips(host, refs) {
+      host.innerHTML = '';
+      if (!refs || !refs.length) {
+        const p = document.createElement('p');
+        p.className = 'muted';
+        p.textContent = '—';
+        host.appendChild(p);
+        return;
+      }
+      refs.slice(0, 8).forEach((ref) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'chip';
+        btn.textContent = ref.name;
+        btn.title = ref.reason || ref.filePath || '';
+        btn.addEventListener('click', () => {
+          openNode({
+            id: ref.id,
+            name: ref.name,
+            kind: ref.kind,
+            filePath: ref.filePath,
+            startLine: ref.startLine,
+            endLine: ref.endLine
+          });
+        });
+        host.appendChild(btn);
+      });
+    }
+
+    function splitNarrativeSections(markdown) {
+      const source = String(markdown || '').trim();
+      if (!source) {
+        return { purpose: '', rest: '' };
+      }
+
+      // Penting: di dalam template literal host, setiap \\ harus digandakan
+      // supaya webview menerima regex/string yang valid (\\n jangan jadi newline).
+      const purposeMatch = source.match(/##\\s*(?:Kodingan ini untuk apa|What this codebase is for)\\s*([\\s\\S]*?)(?=\\n##\\s|$)/i);
+      if (!purposeMatch) {
+        // Fallback: paragraf pertama sebagai tujuan aplikasi
+        const parts = source.split(/\\n##\\s+/);
+        const first = parts[0].replace(/^#+\\s*[^\\n]*\\n?/, '').trim();
+        const rest = parts.length > 1 ? '## ' + parts.slice(1).join('\\n## ') : '';
+        return { purpose: first, rest };
+      }
+
+      const purpose = purposeMatch[1].trim();
+      const rest = (source.slice(0, purposeMatch.index) + source.slice(purposeMatch.index + purposeMatch[0].length))
+        .replace(/^\\s+/, '')
+        .trim();
+      return { purpose, rest };
+    }
+
+    function renderInsights() {
+      if (!insights) {
+        if (insightsPurpose) {
+          insightsPurpose.textContent = ui['webview.noInsightsPurpose'] || 'Jalankan analisis + API key untuk penjelasan aplikasi.';
+        }
+        insightsSummary.textContent = ui['webview.noInsightsSummary'] || 'Jalankan analisis untuk ringkasan.';
+        if (mainFlowTitle) {
+          mainFlowTitle.textContent = ui['webview.mainFlowEmpty'] || 'Belum ada alur';
+          mainFlowMeta.textContent = ui['webview.mainFlowEmptyHint'] || 'Jalankan analisis untuk melihat input, proses, dan output.';
+        }
+        renderChips(mainFlowStages, []);
+        renderChips(entryList, []);
+        renderChips(hubList, []);
+        return;
+      }
+      const markdown = insights.narrative
+        || (insights.summaryBullets || []).map((b) => '- ' + b).join('\\n')
+        || (ui['webview.insights'] || 'Insights');
+      const sections = splitNarrativeSections(markdown);
+      if (insightsPurpose) {
+        insightsPurpose.innerHTML = renderMarkdownLite(
+          sections.purpose || ui['webview.purposeFallback'] || 'Aplikasi ini adalah aplikasi untuk (belum terdeteksi — jalankan ulang analisis dengan API key).'
+        );
+      }
+      insightsSummary.innerHTML = renderMarkdownLite(sections.rest || markdown);
+      const flow = insights.mainFlow;
+      if (flow) {
+        const stageLabels = uniqueFlowStageLabels(flow);
+        if (mainFlowTitle) {
+          mainFlowTitle.textContent = flow.input + ' → ' + flow.output;
+        }
+        if (mainFlowMeta) {
+          mainFlowMeta.textContent = stageLabels.length + ' tahap · io score ' + String(flow.ioScore || 0);
+        }
+        renderChips(
+          mainFlowStages,
+          (flow.stages || []).map((stage) => ({
+            id: stage.nodeId,
+            name: stage.name,
+            kind: 'function',
+            filePath: stage.filePath,
+            startLine: stage.startLine,
+            endLine: stage.endLine,
+            reason: stage.role
+          }))
+        );
+      } else {
+        if (mainFlowTitle) {
+          mainFlowTitle.textContent = ui['webview.mainFlowEmpty'] || 'Belum ada alur';
+        }
+        if (mainFlowMeta) {
+          mainFlowMeta.textContent = ui['webview.mainFlowWeak'] || 'Analisis belum menemukan input, proses, dan output yang kuat.';
+        }
+        renderChips(mainFlowStages, []);
+      }
+      renderChips(entryList, insights.entryPoints || []);
+      renderChips(hubList, insights.hubs || []);
+      document.getElementById('statNodes').textContent = String(insights.stats?.nodeCount || 0);
+    }
+
+    function uniqueFlowStageLabels(flow) {
+      const seen = new Set();
+      const labels = [];
+      (flow.stages || []).forEach((stage) => {
+        const key = stage.role + ':' + stage.name;
+        if (seen.has(key)) return;
+        seen.add(key);
+        labels.push(stage.name);
+      });
+      return labels;
+    }
+
+    function renderStats() {
+      if (!bundle) return;
+      document.getElementById('statFiles').textContent = String(bundle.stats.shownFiles);
+      document.getElementById('statEdges').textContent = String(bundle.stats.edgeCount);
+      document.getElementById('statTotal').textContent = String(bundle.stats.fileCount);
+      badge.textContent = bundle.stats.shownFiles + ' file';
+      const note = document.getElementById('truncateNote');
+      if (bundle.stats.truncated) {
+        note.hidden = false;
+        const tpl = ui['webview.truncateNote'] || 'Ditampilkan {shown} dari {total} file (prioritas entry/hub/relasi).';
+        note.textContent = tpl
+          .replace('{shown}', String(bundle.stats.shownFiles))
+          .replace('{total}', String(bundle.stats.fileCount));
+      } else {
+        note.hidden = true;
+      }
+    }
+
+    function resolveMetaFromSvgNode(el) {
+      const index = (bundle && bundle.nodeIndex) || {};
+      const keys = Object.keys(index);
+      let cur = el;
+      while (cur && cur !== diagramEl) {
+        const rawId = cur.id || '';
+        if (rawId) {
+          if (index[rawId]) return index[rawId];
+          const hit = keys.find((k) => rawId === k || rawId.endsWith('-' + k) || rawId.includes('-' + k + '-') || rawId.startsWith(k));
+          if (hit) return index[hit];
+        }
+        // Mermaid kadang menyimpan id di data-id / title
+        const dataId = cur.getAttribute && (cur.getAttribute('data-id') || cur.getAttribute('data-node'));
+        if (dataId && index[dataId]) return index[dataId];
+        cur = cur.parentElement;
+      }
+
+      // Fallback: cocokkan label teks
+      const text = (el.closest && el.closest('.node') ? el.closest('.node') : el).textContent || '';
+      const label = text.replace(/\\s+/g, ' ').trim();
+      if (!label) return null;
+      return keys.map((k) => index[k]).find((meta) => meta && (meta.name === label || String(meta.name).endsWith(label) || label.endsWith(meta.name))) || null;
+    }
+
+    function wireSvgClicks(svg) {
+      svg.querySelectorAll('g.node').forEach((nodeEl) => {
+        nodeEl.style.cursor = 'pointer';
+        nodeEl.addEventListener('click', (event) => {
+          if (panMoved) return;
+          event.preventDefault();
+          event.stopPropagation();
+          const meta = resolveMetaFromSvgNode(nodeEl);
+          openNode(meta);
+        });
+      });
+    }
+
+    document.querySelectorAll('[data-view]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const next = btn.getAttribute('data-view') || 'architecture';
+        // Klik ulang tab aktif → kembali ke arsitektur default
+        view = view === next ? 'architecture' : next;
+        renderDiagram();
+      });
+    });
+
+    document.getElementById('insightsToggle').addEventListener('click', () => {
+      const open = !contentShell.classList.contains('insights-open');
+      contentShell.classList.toggle('insights-open', open);
+      contentShell.classList.toggle('insights-collapsed', !open);
+      document.getElementById('insightsToggle').textContent = open
+        ? (ui['webview.closeInsights'] || 'Tutup Insights')
+        : (ui['webview.insights'] || 'Insights');
+      // Canvas tetap full width (insights overlay) — cukup re-fit
+      setTimeout(() => fitDiagram(), 80);
+    });
+
+    document.getElementById('themeToggle').addEventListener('click', () => {
+      theme = theme === 'dark' ? 'light' : 'dark';
+      applyTheme();
+      renderDiagram();
+    });
+
+    document.getElementById('copySource').addEventListener('click', () => {
+      vscode.postMessage({ type: 'copySource', source: currentSource() });
+    });
+
+    document.getElementById('openSource').addEventListener('click', () => {
+      sourcePreview.hidden = !sourcePreview.hidden;
+      vscode.postMessage({ type: 'openExternal' });
+    });
+
+    document.getElementById('openFlow').addEventListener('click', () => {
+      vscode.postMessage({ type: 'openMainFlow', flow: insights && insights.mainFlow });
+    });
+    document.getElementById('openMindMap').addEventListener('click', () => {
+      vscode.postMessage({ type: 'openMindMap' });
+    });
+    if (openFlowInline) {
+      openFlowInline.addEventListener('click', () => {
+        vscode.postMessage({ type: 'openMainFlow', flow: insights && insights.mainFlow });
+      });
+    }
+    if (openMindMapInline) {
+      openMindMapInline.addEventListener('click', () => {
+        vscode.postMessage({ type: 'openMindMap' });
+      });
+    }
+
+    document.getElementById('zoomIn').addEventListener('click', () => zoomBy(1.2));
+    document.getElementById('zoomOut').addEventListener('click', () => zoomBy(1 / 1.2));
+    document.getElementById('zoomFit').addEventListener('click', () => fitDiagram());
+    document.getElementById('zoomReset').addEventListener('click', () => resetZoom());
+
+    viewportHost.addEventListener('wheel', (event) => {
+      event.preventDefault();
+      const rect = viewportHost.getBoundingClientRect();
+      const anchorX = event.clientX - rect.left;
+      const anchorY = event.clientY - rect.top;
+      const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+      setZoom(scale * factor, anchorX, anchorY);
+    }, { passive: false });
+
+    viewportHost.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      // Jangan mulai pan jika klik langsung di node (biar click tetap jalan)
+      if (event.target && event.target.closest && event.target.closest('g.node')) {
+        panMoved = false;
+        return;
+      }
+      isPanning = true;
+      panMoved = false;
+      startX = event.clientX;
+      startY = event.clientY;
+      originX = panX;
+      originY = panY;
+      viewportHost.classList.add('is-panning');
+      viewportHost.setPointerCapture(event.pointerId);
+    });
+
+    viewportHost.addEventListener('pointermove', (event) => {
+      if (!isPanning) return;
+      const dx = event.clientX - startX;
+      const dy = event.clientY - startY;
+      if (Math.abs(dx) + Math.abs(dy) > 4) panMoved = true;
+      panX = originX + dx;
+      panY = originY + dy;
+      applyTransform();
+    });
+
+    function endPan(event) {
+      if (!isPanning) return;
+      isPanning = false;
+      viewportHost.classList.remove('is-panning');
+      try { viewportHost.releasePointerCapture(event.pointerId); } catch (_) {}
+    }
+    viewportHost.addEventListener('pointerup', endPan);
+    viewportHost.addEventListener('pointercancel', endPan);
 
     window.addEventListener('message', (event) => {
       const msg = event.data;
-      if (!msg || typeof msg !== 'object') {
-        return;
-      }
-
-      if (msg.type === 'setGraph') {
-        currentGraph = msg.graph ?? currentGraph;
-        if (Object.prototype.hasOwnProperty.call(msg, 'insights')) {
-          renderInsights(msg.insights);
+      if (!msg || typeof msg !== 'object') return;
+      try {
+        if (msg.type === 'setGraph') {
+          life('msg-setGraph', 'state=' + (msg.state || '') + ' arch=' + ((msg.bundle && msg.bundle.architecture) || '').length);
+          bundle = msg.bundle || bundle;
+          if (Object.prototype.hasOwnProperty.call(msg, 'insights')) {
+            insights = msg.insights;
+          }
+          if (msg.view) view = msg.view;
+          try {
+            renderInsights();
+          } catch (err) {
+            console.warn('NeverMIN insights render error', err);
+          }
+          if (msg.state === 'loading' || msg.state === 'empty' || msg.state === 'error') {
+            setState(msg.state, msg.message);
+            return;
+          }
+          void renderDiagram();
+          return;
         }
-        resetNodeDetail();
-        renderGraph(currentGraph, msg.state ?? 'ready', msg.message);
-        return;
-      }
-
-      if (msg.type === 'setState') {
-        setState(msg.state ?? 'loading', msg.message);
+        if (msg.type === 'setState') {
+          setState(msg.state || 'loading', msg.message);
+          return;
+        }
+        if (msg.type === 'setTheme' && (msg.mode === 'light' || msg.mode === 'dark')) {
+          theme = msg.mode;
+          applyTheme();
+          void renderDiagram();
+        }
+      } catch (err) {
+        const detail = err && err.message ? err.message : String(err);
+        setState('error', 'Gagal memproses update diagram: ' + detail);
       }
     });
 
-    if (searchInput) {
-      searchInput.addEventListener('input', (event) => {
-        currentQuery = event.target.value;
-        applySearchFilter();
-      });
+    applyTheme();
+    applyTransform();
+    try {
+      renderInsights();
+    } catch (err) {
+      console.warn('NeverMIN insights bootstrap error', err);
     }
 
-    if (fitViewBtn) {
-      fitViewBtn.addEventListener('click', () => {
-        fitGraph(64);
-      });
-    }
+    // Handshake SEBELUM Mermaid load — supaya setGraph tidak stuck di queue.
+    life('shell-ready');
+    try {
+      vscode.postMessage({ type: 'ready', generation: bootGeneration });
+    } catch (_) {}
 
-    if (viewModeToggle) {
-      viewModeToggle.addEventListener('click', () => {
-        viewMode = viewMode === 'overview' ? 'detail' : 'overview';
-        try {
-          localStorage.setItem('nevermin.graphViewMode', viewMode);
-        } catch (_) {}
-        updateViewModeToggleLabel();
-        runClusterLayout();
-        applySearchFilter({ fit: false });
-      });
+    if (boot.state === 'loading' || boot.state === 'empty' || boot.state === 'error') {
+      setState(boot.state, boot.message);
+    } else {
+      void renderDiagram();
     }
-
-    if (zoomInBtn) {
-      zoomInBtn.addEventListener('click', () => {
-        if (!cy) return;
-        cy.zoom(cy.zoom() * 1.2);
-      });
-    }
-
-    if (zoomOutBtn) {
-      zoomOutBtn.addEventListener('click', () => {
-        if (!cy) return;
-        cy.zoom(cy.zoom() / 1.2);
-      });
-    }
-
-    if (zoomFitBtn) {
-      zoomFitBtn.addEventListener('click', () => {
-        fitGraph(64);
-      });
-    }
-
-    if (openExternalBtn) {
-      openExternalBtn.addEventListener('click', () => {
-        vscode.postMessage({ type: 'openExternal' });
-      });
-    }
-
-    if (themeToggle) {
-      themeToggle.addEventListener('click', () => {
-        currentThemeMode = currentThemeMode === 'light' ? 'dark' : 'light';
-        currentTheme = THEMES[currentThemeMode];
-        try {
-          localStorage.setItem('nevermin.graphTheme', currentThemeMode);
-        } catch (_) {}
-        applyThemeToGraph(currentTheme);
-        updateThemeToggleLabel();
-      });
-    }
-
-    renderInsights(currentInsights);
-    renderGraph(currentGraph, ${JSON.stringify(initialState)}, ${JSON.stringify(initialMessage ?? '')});
+  } catch (bootErr) {
+    var detail = bootErr && bootErr.message ? bootErr.message : String(bootErr);
+    life('boot-crash', detail);
+    document.body.innerHTML = '<pre style="padding:16px;color:#f87171;white-space:pre-wrap;font:12px/1.45 monospace">NeverMIN webview crash:\\n' + detail + '</pre>';
+    try {
+      vscode.postMessage({ type: 'renderStatus', ok: false, detail: 'boot: ' + detail });
+      vscode.postMessage({ type: 'ready', generation: bootGeneration });
+    } catch (_) {}
+  }
   </script>
 </body>
 </html>`;
@@ -1569,10 +1613,7 @@ async function revealAndExplainNode(node: GraphNode): Promise<void> {
     }
 
     const document = await vscode.workspace.openTextDocument(resolvedUri);
-    const editor = await vscode.window.showTextDocument(document, {
-      preview: true,
-      preserveFocus: false
-    });
+    const editor = await showDocumentInActiveColumn(document, { preview: true });
 
     const lineCount = Math.max(1, document.lineCount);
     const startLine = Math.max(0, Math.min(lineCount - 1, (node.startLine ?? 1) - 1));
@@ -1584,17 +1625,7 @@ async function revealAndExplainNode(node: GraphNode): Promise<void> {
 
     editor.selection = new vscode.Selection(start, end);
     editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
-    await vscode.commands.executeCommand('nevermin.explainSelection');
   } catch (error) {
-    vscode.window.showErrorMessage(`NeverMIN gagal membuka symbol ${node.name}: ${error}`);
+    vscode.window.showErrorMessage(`NeverMIN gagal membuka ${node.name}: ${error}`);
   }
-}
-
-function getNonce(): string {
-  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let text = '';
-  for (let i = 0; i < 32; i += 1) {
-    text += possible.charAt(Math.floor(Math.random() * possible.length));
-  }
-  return text;
 }

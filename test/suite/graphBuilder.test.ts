@@ -1,4 +1,5 @@
 import * as assert from 'assert';
+import path from 'path';
 import { buildRepoGraph, traceFrom } from '../../src/core/graph/graphBuilder';
 
 describe('buildRepoGraph', () => {
@@ -162,6 +163,104 @@ describe('buildRepoGraph', () => {
     assert.ok(
       graph.edges.some((edge) => edge.kind === 'uses' && edge.from === sidebarNode!.id && edge.to === contextNode!.id),
       'pemakaian JSX <SidebarContext /> harus jadi edge uses'
+    );
+  });
+
+  it('tidak menjadikan if/for/while sebagai method class', async () => {
+    const graph = await buildRepoGraph([
+      {
+        path: 'src/service.ts',
+        content: [
+          'export class Worker {',
+          '  run(flag: boolean) {',
+          '    if (flag) {',
+          '      return 1;',
+          '    }',
+          '    for (const item of [1, 2]) {',
+          '      void item;',
+          '    }',
+          '    while (false) {',
+          '      break;',
+          '    }',
+          '  }',
+          '}'
+        ].join('\n')
+      }
+    ]);
+
+    const methodNames = graph.nodes.filter((node) => node.kind === 'method').map((node) => node.name);
+    assert.ok(methodNames.includes('Worker.run'));
+    assert.ok(!methodNames.some((name) => /\b(if|for|while)\b/.test(name)));
+  });
+
+  it('resolve path relatif terhadap workspaceRoot (bukan cwd)', async () => {
+    const workspaceRoot = path.resolve('/workspace/nevermin-app');
+    const graph = await buildRepoGraph([
+      {
+        path: 'src/index.ts',
+        workspaceRoot,
+        content: ['export function boot() {', '  return true;', '}'].join('\n')
+      }
+    ]);
+
+    const fileNode = graph.nodes.find((node) => node.kind === 'file');
+    assert.ok(fileNode);
+    assert.strictEqual(fileNode!.id, path.resolve(workspaceRoot, 'src/index.ts'));
+    assert.strictEqual(fileNode!.filePath, path.normalize('src/index.ts'));
+  });
+
+  it('menghubungkan import/calls Python antar file (relative + absolute)', async () => {
+    const workspaceRoot = path.resolve('/workspace/py-app');
+    const graph = await buildRepoGraph([
+      {
+        path: 'pkg/math_utils.py',
+        workspaceRoot,
+        content: [
+          'def add(left, right):',
+          '  return left + right',
+          '',
+          'def mul(left, right):',
+          '  return left * right'
+        ].join('\n')
+      },
+      {
+        path: 'pkg/service.py',
+        workspaceRoot,
+        content: [
+          'from .math_utils import add',
+          'from pkg.math_utils import mul',
+          '',
+          'def run():',
+          '  return add(1, 2) + mul(2, 3)'
+        ].join('\n')
+      }
+    ]);
+
+    const addNode = graph.nodes.find((node) => node.name === 'add');
+    const mulNode = graph.nodes.find((node) => node.name === 'mul');
+    const runNode = graph.nodes.find((node) => node.name === 'run');
+    const serviceFile = graph.nodes.find((node) => node.kind === 'file' && node.name === 'service.py');
+
+    assert.ok(addNode, 'add harus terdeteksi');
+    assert.ok(mulNode, 'mul harus terdeteksi');
+    assert.ok(runNode, 'run harus terdeteksi');
+    assert.ok(serviceFile);
+
+    assert.ok(
+      graph.edges.some((edge) => edge.kind === 'imports' && edge.from === serviceFile!.id && edge.to === addNode!.id),
+      'from .math_utils import add harus jadi imports'
+    );
+    assert.ok(
+      graph.edges.some((edge) => edge.kind === 'imports' && edge.from === serviceFile!.id && edge.to === mulNode!.id),
+      'from pkg.math_utils import mul harus jadi imports'
+    );
+    assert.ok(
+      graph.edges.some((edge) => edge.kind === 'calls' && edge.from === runNode!.id && edge.to === addNode!.id),
+      'add() harus jadi calls'
+    );
+    assert.ok(
+      graph.edges.some((edge) => edge.kind === 'calls' && edge.from === runNode!.id && edge.to === mulNode!.id),
+      'mul() harus jadi calls'
     );
   });
 });

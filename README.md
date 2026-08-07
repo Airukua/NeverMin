@@ -1,238 +1,242 @@
-<div align="center">
+# NeverMIN
 
-# 🧭 NeverMIN
+**Never Mind the confusion** — a VS Code / Cursor extension to quickly understand unfamiliar codebases.
 
-**Never Mind the confusion — an onboarding buddy for unfamiliar codebases.**
+NeverMIN parses your project, builds a *code graph*, then shows you:
 
-*Parses your project, builds a code graph, and shows you the main Input → Process → Output flow.*
+- **Entry points** & **hubs** (heuristic centrality score)
+- **Main flow** Input → Process → Output (Mermaid)
+- **Learning Mind Map** (exploration order)
+- **Explain Code** via LLM (optional)
 
-[![VS Code](https://img.shields.io/badge/VS%20Code-%5E1.90.0-007ACC?style=flat-square&logo=visualstudiocode&logoColor=white)](https://code.visualstudio.com/api)
-[![Node.js 20+](https://img.shields.io/badge/node-20%2B-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
-[![Tree-sitter](https://img.shields.io/badge/parser-Tree--sitter-4B8BBE?style=flat-square)](https://github.com/tree-sitter/tree-sitter)
-[![Providers](https://img.shields.io/badge/LLM-Gemini%20%7C%20DeepSeek-8A2BE2?style=flat-square)](#4-explain-code)
-[![License](https://img.shields.io/badge/license-TBD-lightgrey?style=flat-square)](#license)
-
-</div>
+Repo: [github.com/abdulwahidrukua/NeverMIN](https://github.com/abdulwahidrukua/NeverMIN)
 
 ---
 
-NeverMIN is a VS Code extension that acts like an onboarding buddy for unfamiliar codebases. It parses your project, builds a code relationship graph, infers the main **Input → Process → Output** data flow, and helps you explain code with an LLM (Gemini or DeepSeek).
+## Privacy & security — analyze without leaking your code
 
-Joining a new repo often feels like noise: too many files, unclear entry points, and no obvious "where does data come in / go out?" NeverMIN focuses on closing that gap.
+NeverMIN is built so you can map a private or proprietary codebase **without sending source to a third party**, as long as you stay on the local path.
 
-| Goal | What you get |
-|------|----------------|
-| Speed up understanding | Repo analysis + graph + insights in one sidebar |
-| Reduce confusion | Main data flow shown as **Input → Process → Output** |
-| Stay in the editor | Explain selection, open symbols from the graph, open graph in the browser |
-| Optional AI narrative | LLM summary when an API key is configured |
+### First choice in the sidebar
 
-> 📖 **Marketplace release coming soon.**
+When you open NeverMIN, the sidebar asks you to pick **before** other features unlock:
+
+| Choice | Meaning |
+|--------|---------|
+| **Private codebase** | Local-only path: parse/graph/git stay on disk; LLM locked to **Ollama**; cloud API keys are cleared |
+| **Public codebase** | Same local tools, plus optional cloud LLM (Gemini, OpenAI, …) when you save a key |
+
+You can change this later under **Settings → Change privacy mode** (`NeverMIN: Choose Private / Public Codebase`).
+
+### What stays on your machine by default
+
+| Step | Where it runs | Leaves your machine? |
+|------|----------------|----------------------|
+| Parse files (Tree-sitter / fallback) | Local VS Code / Cursor process | **No** |
+| Build code graph, entry/hub/flow insights | Local | **No** |
+| Mermaid diagrams & Learning Mind Map | Local webview | **No** |
+| Git History (churn, owners, co-change) | Local `git` CLI | **No** |
+| Sidebar results & logs | Local workspace state / Output channel | **No** |
+
+You can run full structural analysis and Git History **with no API key and no network LLM call**. Your repo is read from disk; nothing is uploaded for that pipeline.
+
+### Fully private LLM mode (recommended for sensitive repos)
+
+1. In the sidebar, choose **Private codebase** (or Command Palette → `NeverMIN: Use Private Codebase Mode`).
+2. Install and run [Ollama](https://ollama.com), then pick a model (`NeverMIN: Pilih Model Ollama`).
+3. Cloud API keys are cleared automatically; provider switching to Gemini/OpenAI/etc. is blocked until you switch to Public mode.
+
+With Ollama:
+
+- Explain Code / insight narration talks to `127.0.0.1` (or your configured `nevermin.ollamaBaseUrl`) only.
+- No cloud API key is required or kept for that session path.
+- Your prompts and code snippets are not sent to NeverMIN’s authors or a hosted NeverMIN server — there is none.
+
+### When code *can* leave your machine
+
+Only if **you** choose a **cloud** provider (Gemini, OpenAI, Anthropic, OpenRouter, …) and run an LLM feature (Explain Code, narrative enrichment). Then the prompt (including selected code / insight summaries) goes to **that** provider under **their** terms.
+
+To stay leak-free: keep `nevermin.provider` = `ollama`, or skip LLM features entirely and use graph + Git History alone.
+
+### Practical checklist for a secure setup
+
+```text
+1. nevermin.provider = ollama   (auto when Private mode is chosen)
+2. nevermin.ollamaBaseUrl = http://127.0.0.1:11434/v1
+3. Do not Save API Key while on Ollama / Private mode
+4. When finished: sidebar → Settings → Wipe this workspace data
+```
+
+**Wipe this workspace data** clears analysis, Git History, file checks, and LLM prompt cache from VS Code `workspaceState` for the current workspace (repo files unchanged). Choose **Full reset** if you also want to re-pick Private/Public.
 
 ---
 
-## Install
+## How to use in VS Code / Cursor
+
+### A. Run from source (development)
+
+1. Clone and build:
 
 ```bash
-git clone <your-repo-url> NeverMIN
+git clone https://github.com/abdulwahidrukua/NeverMIN.git
 cd NeverMIN
 npm install
 npm run compile
 ```
 
-`npm install` runs `postinstall` to copy Tree-sitter WASM grammars into `media/grammars/`.
+2. Open the `NeverMIN` folder in VS Code / Cursor.
+3. Press **F5** (*Run Extension*) → an **Extension Development Host** window opens.
+4. In that window, go to **File → Open Folder** and select the project you want to analyze.
+5. In the left Activity Bar, click the **NeverMIN** icon.
 
-Then in VS Code:
+### B. Use via a `.vsix` file (optional)
 
-1. Open this folder
-2. Press **F5** (`Run Extension`) to launch the Extension Development Host
-3. Open a workspace you want to explore
-4. Open the **NeverMIN** activity bar view
+```bash
+npm run package
+```
 
-| Script | Purpose |
-|--------|---------|
-| `npm run compile` | Build `src/` → `dist/` |
-| `npm run watch` | Rebuild on change |
-| `npm test` | Unit tests |
-| `npm run copy-grammars` | Refresh Tree-sitter WASM files |
-| `npm run package` | Package the `.vsix` |
+Then in VS Code / Cursor: **Extensions → … → Install from VSIX…** and select the generated `.vsix` file.
+
+> No official Marketplace release yet.
 
 ---
 
-## Quick Start
+## Everyday workflow
 
-### 1. Configure a provider (optional but recommended)
+### 1. (Optional) Configure language & LLM
 
-In the NeverMIN sidebar → **Settings**, or Command Palette:
+In the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
 
-- `NeverMIN: Simpan API Key`
-- `NeverMIN: Pakai Gemini` / `NeverMIN: Pakai DeepSeek`
+| Command | Function |
+|---------|----------|
+| `NeverMIN: Pilih Bahasa / Choose Language` | UI in `id` or `en` |
+| `NeverMIN: Pilih LLM Provider` | Gemini, OpenAI, Anthropic, OpenRouter, DeepSeek, Groq, Mistral, Together, xAI, **Ollama (local)** |
+| `NeverMIN: Pilih Model Ollama` | Detect installed / loaded Ollama models |
+| `NeverMIN: Simpan API Key` | Cloud providers only — stored in SecretStorage (cleared when you switch to Ollama) |
 
-Settings keys:
-
-```yaml
-nevermin.provider: gemini   # gemini | deepseek
-nevermin.apiKey: ""         # fallback only; prefer SecretStorage via the command above
-```
+Without a cloud API key, graph analysis, diagrams, and structural Git History still work. For private LLM narration, use **Ollama** (see [Privacy & security](#privacy--security--analyze-without-leaking-your-code)).
 
 ### 2. Analyze the repo
 
-1. Open **Status** to confirm workspace + API key state
-2. Optionally check files under **Pilih File**
-3. Under **Jalankan**, run full-repo or selected-file analysis
-4. Open **Hasil Analisis** for stats, **Flow Utama (Data)**, entry points, hubs, and more
+In the NeverMIN sidebar:
 
-### 3. Explore the graph
+1. Check the **Status** (workspace open, key configured or not).
+2. (Optional) check off files in **Select Files**, or leave it as full-repo.
+3. In **Run**, choose whole-repo analysis or the selected files.
 
-- Open the graph panel from analysis results
-- Default view is **overview** (files + cross-file relations)
-- Switch to **detail** for functions/classes
-- Click **Flow Utama** / insight items in the sidebar to jump to related code
-- Use **Buka di Browser** for a larger canvas
+Same commands are available via the Command Palette:
 
-### 4. Explain code
+- `NeverMIN: Analyze Repo Structure`
+- `NeverMIN: Select Files to Analyze`
 
-Select code (or rely on the active file) and run:
+### 3. Analyze Git History (sidebar only)
 
-```text
-NeverMIN: Jelaskan Kode Ini
-```
+Answers: what is alive vs frozen, why the code looks like this, who knows the area, and hidden coupling (files often committed together).
 
----
+1. Ensure the folder is a **git repository**.
+2. In **Run** → **Analyze Git History**, or open **5. Git History** → **Run Git History analysis**.
+3. Results stay in the sidebar (no webview):
+   - LLM summary (if Ollama or a cloud provider is configured)
+   - Alive / Frozen
+   - Why it looks like this (commits)
+   - Who knows this (owners)
+   - Hidden coupling
 
-## Main Data Flow
+Command: `NeverMIN: Analisis Git History`
 
-After analysis, NeverMIN tries to present the application's primary path as:
+### 4. Read the graph results
 
-```text
-Input   →  where data enters (forms, pickers, handlers, …)
-Process →  transforms / services / utils in the middle
-Output  →  where results appear (tables, views, dashboards, …)
-```
+In **Analysis Results** you'll typically see:
 
-This is heuristic (names, paths, and graph edges) — an onboarding map, not a formal data-flow proof.
+- graph statistics
+- **Main Flow** (Input → Process → Output)
+- entry points & hubs
+- summary / narration (if LLM is enabled)
 
----
+Open diagrams:
 
-## Architecture
+| Command | Content |
+|---------|---------|
+| `NeverMIN: Open Main Flow (Mermaid)` | flowchart of the main data flow |
+| `NeverMIN: Open Insight Graph` | architecture / module panel |
+| `NeverMIN: Open Learning Mind Map` | mind map of learning order |
+| `NeverMIN: Open Insights Summary` | insights narration |
+| `NeverMIN: Buka Ringkasan Git History` | Git History narration |
 
-```text
-workspace
-  → parse (Tree-sitter + regex fallback)
-  → graph (symbols & relations)
-  → insights (entry / hub / Input→Output flow)
-  → UI (sidebar + Cytoscape webview)
-  → optional LLM (explain + narrative)
-```
+Click a node / insight chip to jump to the related file.
 
-### Folder layout
+### 5. Explain a code snippet
 
-| Path | Role |
-|------|------|
-| `src/extension.ts` | Activation, commands wiring |
-| `src/commands/` | Explain / analyze commands |
-| `src/core/parser/` | Language registry + AST / symbol extraction |
-| `src/core/graph/` | Graph build, traversal, insights |
-| `src/core/analysis/` | Repo analysis aggregation |
-| `src/core/context/` | Chunking for LLM context |
-| `src/core/llm/` | Providers, prompts, retry / rate limit |
-| `src/ui/sidebar/` | Onboarding tree view |
-| `src/ui/webview/` | Graph panel, themes, standalone browser HTML |
-| `src/utils/` | Config, workspace, logger |
-| `media/` | Icon + Tree-sitter grammars |
-| `scripts/copy-grammars.js` | Copies WASM grammars after install |
-| `test/` | Unit and e2e tests |
+1. Select code in the editor (or focus the active file).
+2. Command Palette → `NeverMIN: Jelaskan Kode Ini`.
 
-Core business logic under `src/core/` avoids importing `vscode` so it stays unit-testable.
-
-### Supported languages (parser)
-
-| Extension | Grammar |
-|-----------|---------|
-| `.ts` | TypeScript |
-| `.tsx` | TSX |
-| `.py` | Python |
-| `.js` / `.jsx` | Regex fallback (no dedicated grammar wired yet) |
-
-If WASM loading fails in a given environment, NeverMIN falls back to a simple regex symbol extractor so analysis still runs.
+Uses the active provider. For a private repo, prefer **Ollama** so the snippet never hits a cloud API.
 
 ---
 
-## Contributing
+## Settings
 
-Contributions are welcome — especially if you care about developer experience.
+Open **Settings** and search for `nevermin`, or run `NeverMIN: Open Settings`.
 
-**Highest priority: UI**
-
-- Sidebar clarity and visual hierarchy (especially **Flow Utama**)
-- Graph readability (layout, density, light mode polish)
-- Empty / loading / error states that feel intentional
-- Browser graph experience
-- Accessibility and responsive layout inside the webview
-
-If you want to contribute and are unsure where to start: **pick UI**.
-
-**Other welcome areas**
-
-- Stronger Input → Output flow heuristics
-- Better import / call / JSX edge detection
-- Retrieval / ranking for explain-context chunks
-- Tests around graph insights and parser edge cases
-- Docs and examples for common stacks (Next.js, Nest, Django, …)
-
-**Suggested workflow**
-
-1. Fork and create a branch
-2. `npm install && npm run compile && npm test`
-3. Keep `src/core` free of `vscode` imports when possible
-4. Describe the UX problem you solved in the PR
+| Setting | Description |
+|---------|--------------|
+| `nevermin.language` | `id` \| `en` |
+| `nevermin.provider` | LLM provider |
+| `nevermin.model` | Override model (empty = provider default) |
+| `nevermin.temperature` | Generation temperature |
+| `nevermin.maxAnalysisFiles` | File limit during analysis |
+| `nevermin.ollamaBaseUrl` | Ollama OpenAI-compatible base URL (default local) |
+| `nevermin.apiKey` | Cloud fallback only — avoided when using Ollama (keys are cleared) |
 
 ---
 
-## Roadmap
+## Other commands
 
-- [ ] Richer UI for main flow and graph overview
-- [ ] More language grammars (JavaScript / JSX first)
-- [ ] Symbol-aware retrieval for explanations
-- [ ] Stable Tree-sitter loading across Windows / WSL / remote hosts
-- [ ] Publish a polished Marketplace release
+| Command | Function |
+|---------|----------|
+| `NeverMIN: Refresh Sidebar` | Reload the sidebar tree |
+| `NeverMIN: Buka Output Logs` | NeverMIN log channel |
+| `NeverMIN: Bersihkan Logs` | Clear activity log |
+| `NeverMIN: Centang Semua File` / `Kosongkan Centang File` | File selection for analysis |
+| `NeverMIN: Pilih Model Ollama` | List & select local Ollama models |
 
 ---
 
-## Citation
+## Parsed languages
 
-```bibtex
-@software{nevermin2026,
-  author = {Abdul Wahid Rukua},
-  title  = {NeverMIN: Never Mind the confusion — I'm gonna use this to speed up understanding},
-  year   = {2026},
-  url    = {https://github.com/}
-}
-```
+| Extension | Parser |
+|-----------|--------|
+| `.ts` | Tree-sitter TypeScript |
+| `.tsx` | Tree-sitter TSX |
+| `.py` | Tree-sitter Python |
+| `.js` / `.jsx` | Regex fallback |
+
+If the Tree-sitter WASM fails to load, symbol extraction still falls back and works.
+
+---
+
+## Development scripts
+
+| Script | Function |
+|--------|----------|
+| `npm run compile` | Build `src/` → `dist/` |
+| `npm run watch` | Auto-rebuild |
+| `npm test` | Unit tests |
+| `npm run copy-grammars` | Copy Tree-sitter WASM grammars |
+| `npm run package` | Create `.vsix` |
+
+`npm install` runs a `postinstall` step that copies grammars into `media/grammars/`.
+
+---
+
+## Quick note
+
+Insights (entry / hub / flow) are based on heuristic graph analysis (degree + centrality), **not** formal proof of data flow. Good for an onboarding map, not a replacement for a full architecture review.
 
 ---
 
 ## License
-This Program under the MIT license
 
----
+[MIT](LICENSE)
 
-## Author
-
-**Abdul Wahid Rukua**
-
-Built with:
-
-- [VS Code Extension API](https://code.visualstudio.com/api)
-- [web-tree-sitter](https://github.com/tree-sitter/tree-sitter/tree/master/lib/binding_web) + [tree-sitter-wasms](https://www.npmjs.com/package/tree-sitter-wasms)
-- [Cytoscape.js](https://js.cytoscape.org/)
-
-[![GitHub](https://img.shields.io/badge/GitHub-Abdul%20Wahid%20Rukua-181717?style=flat-square&logo=github&logoColor=white)](https://github.com/)
-
----
-
-<p align="center">
-  <strong>NeverMIN</strong><br />
-  <em>Never Mind the confusion — I'm gonna use this to speed up understanding.</em><br /><br />
-  Author: <strong>Abdul Wahid Rukua</strong>
-</p>
+**Abdul Wahid Rukua** — [GitHub](https://github.com/abdulwahidrukua)

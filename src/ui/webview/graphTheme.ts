@@ -36,78 +36,81 @@ export interface GraphThemePalette {
   selection: string;
 }
 
-/** Light: paper-cool dashboard with soft file cards and distinct semantic hues. */
+/**
+ * Light: cool ink canvas + teal accent.
+ * Avoids purple-gradient / cream-terracotta defaults.
+ */
 export const LIGHT_GRAPH_THEME: GraphThemePalette = {
   mode: 'light',
-  bg: '#F5F8FC',
-  bgAccentA: 'rgba(37, 99, 235, 0.06)',
-  bgAccentB: 'rgba(13, 148, 136, 0.05)',
-  panel: '#FFFFFF',
+  bg: '#EEF2F6',
+  bgAccentA: 'rgba(15, 118, 110, 0.07)',
+  bgAccentB: 'rgba(30, 64, 175, 0.05)',
+  panel: '#F8FAFC',
   panelSolid: '#FFFFFF',
-  header: '#FFFFFF',
+  header: 'rgba(248, 250, 252, 0.94)',
   border: 'rgba(15, 23, 42, 0.10)',
   text: '#0F172A',
   muted: '#64748B',
-  accent: '#2563EB',
+  accent: '#0F766E',
   warn: '#B45309',
   error: '#DC2626',
   inputBg: '#FFFFFF',
   cardBg: '#FFFFFF',
-  badgeBg: '#F1F5F9',
+  badgeBg: '#E2E8F0',
   nodeLabel: '#0F172A',
-  nodeOutline: 'rgba(255, 255, 255, 0.95)',
+  nodeOutline: 'rgba(255, 255, 255, 0.9)',
   edgeLabel: '#334155',
   edgeLabelBg: 'rgba(255, 255, 255, 0.92)',
-  function: '#2563EB',
-  class: '#7C3AED',
-  method: '#0D9488',
+  function: '#1D4ED8',
+  class: '#0F766E',
+  method: '#0369A1',
   file: '#FFFFFF',
-  fileBorder: '#F97316',
-  fileText: '#9A3412',
-  variable: '#15803D',
-  imports: '#2563EB',
-  calls: '#059669',
+  fileBorder: '#0F766E',
+  fileText: '#134E4A',
+  variable: '#4D7C0F',
+  imports: '#1D4ED8',
+  calls: '#0F766E',
   uses: '#7C3AED',
-  extends: '#DB2777',
+  extends: '#BE185D',
   defines: '#CBD5E1',
   selection: '#0F172A'
 };
 
-/** Dark: keep existing night look with matched semantic hues. */
+/** Dark: deep slate with teal/cyan accents. */
 export const DARK_GRAPH_THEME: GraphThemePalette = {
   mode: 'dark',
   bg: '#0B1220',
-  bgAccentA: 'rgba(87, 166, 255, 0.14)',
-  bgAccentB: 'rgba(245, 158, 11, 0.1)',
-  panel: 'rgba(8, 12, 20, 0.92)',
+  bgAccentA: 'rgba(45, 212, 191, 0.10)',
+  bgAccentB: 'rgba(96, 165, 250, 0.08)',
+  panel: 'rgba(8, 12, 20, 0.94)',
   panelSolid: '#111827',
-  header: 'rgba(10, 15, 25, 0.92)',
-  border: 'rgba(148, 163, 184, 0.22)',
+  header: 'rgba(10, 15, 25, 0.94)',
+  border: 'rgba(148, 163, 184, 0.18)',
   text: '#E2E8F0',
   muted: '#94A3B8',
-  accent: '#57A6FF',
+  accent: '#2DD4BF',
   warn: '#F59E0B',
   error: '#EF4444',
   inputBg: 'rgba(255, 255, 255, 0.04)',
-  cardBg: 'rgba(11, 15, 24, 0.82)',
-  badgeBg: 'rgba(17, 24, 39, 0.86)',
+  cardBg: 'rgba(15, 23, 42, 0.88)',
+  badgeBg: 'rgba(30, 41, 59, 0.9)',
   nodeLabel: '#E2E8F0',
-  nodeOutline: 'rgba(0, 0, 0, 0.75)',
+  nodeOutline: 'rgba(0, 0, 0, 0.7)',
   edgeLabel: '#CBD5E1',
-  edgeLabelBg: 'rgba(8, 12, 20, 0.85)',
-  function: '#57A6FF',
-  class: '#8B5CF6',
-  method: '#14B8A6',
-  file: 'rgba(245, 158, 11, 0.16)',
-  fileBorder: 'rgba(251, 191, 36, 0.65)',
-  fileText: '#FCD34D',
-  variable: '#22C55E',
-  imports: '#57A6FF',
-  calls: '#34D399',
-  uses: '#A78BFA',
+  edgeLabelBg: 'rgba(8, 12, 20, 0.88)',
+  function: '#60A5FA',
+  class: '#2DD4BF',
+  method: '#38BDF8',
+  file: 'rgba(45, 212, 191, 0.10)',
+  fileBorder: 'rgba(45, 212, 191, 0.55)',
+  fileText: '#99F6E4',
+  variable: '#A3E635',
+  imports: '#60A5FA',
+  calls: '#2DD4BF',
+  uses: '#C4B5FD',
   extends: '#F472B6',
-  defines: 'rgba(148, 163, 184, 0.55)',
-  selection: '#FFFFFF'
+  defines: 'rgba(148, 163, 184, 0.45)',
+  selection: '#F8FAFC'
 };
 
 export function getGraphTheme(mode: GraphThemeMode): GraphThemePalette {
@@ -146,7 +149,6 @@ export function themeToCssVars(theme: GraphThemePalette): string {
   ].join('\n      ');
 }
 
-/** Serialized into webview JS so Cytoscape styles can switch with the theme. */
 export function themeToJsObject(theme: GraphThemePalette): string {
   return JSON.stringify(theme);
 }
@@ -158,26 +160,22 @@ export function getSharedGraphUiCss(): string {
       height: 100%;
       color: var(--text);
       background:
-        radial-gradient(circle at top right, var(--bg-accent-a), transparent 34%),
-        radial-gradient(circle at bottom left, var(--bg-accent-b), transparent 28%),
+        radial-gradient(ellipse 80% 50% at 100% -10%, var(--bg-accent-a), transparent 55%),
+        radial-gradient(ellipse 60% 40% at -10% 110%, var(--bg-accent-b), transparent 50%),
         var(--bg);
       background-attachment: fixed;
     }
-    body[data-theme="light"] {
-      color-scheme: light;
-    }
-    body[data-theme="dark"] {
-      color-scheme: dark;
-    }
+    body[data-theme="light"] { color-scheme: light; }
+    body[data-theme="dark"] { color-scheme: dark; }
     #graph {
       background-image:
-        radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--text) 8%, transparent) 1px, transparent 0);
-      background-size: 22px 22px;
+        radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--text) 6%, transparent) 1px, transparent 0);
+      background-size: 28px 28px;
     }
     body[data-theme="light"] #graph {
       background-image:
-        radial-gradient(circle at 1px 1px, rgba(15, 23, 42, 0.06) 1px, transparent 0);
-      background-size: 22px 22px;
+        radial-gradient(circle at 1px 1px, rgba(15, 23, 42, 0.045) 1px, transparent 0);
+      background-size: 28px 28px;
     }
   `;
 }
@@ -193,19 +191,21 @@ export function getCytoscapeStyleBuilderScript(): string {
             label: 'data(label)',
             cursor: 'pointer',
             color: '#FFFFFF',
-            width: 52,
-            height: 24,
+            width: 56,
+            height: 26,
             'font-size': 10,
-            'font-weight': 650,
+            'font-weight': 600,
+            'font-family': 'ui-sans-serif, system-ui, sans-serif',
             'text-wrap': 'ellipsis',
-            'text-max-width': 46,
+            'text-max-width': 50,
             'text-valign': 'center',
             'text-halign': 'center',
-            'text-margin-y': 0,
             'background-color': theme.function,
             'border-width': 0,
             'text-outline-width': 0,
-            'overlay-padding': 4
+            'overlay-padding': 6,
+            'transition-property': 'opacity, border-width, width, height',
+            'transition-duration': '120ms'
           }
         },
         {
@@ -213,8 +213,9 @@ export function getCytoscapeStyleBuilderScript(): string {
           style: {
             'background-color': theme.function,
             shape: 'round-rectangle',
-            width: 64,
-            height: 26
+            width: 72,
+            height: 28,
+            'text-max-width': 64
           }
         },
         {
@@ -222,14 +223,26 @@ export function getCytoscapeStyleBuilderScript(): string {
           style: {
             'background-color': theme.class,
             shape: 'round-rectangle',
-            width: 58,
-            height: 26
+            width: 68,
+            height: 28,
+            'text-max-width': 60
           }
         },
         {
           selector: 'node[kind = "method"]',
           style: {
             'background-color': theme.method,
+            shape: 'round-rectangle',
+            width: 58,
+            height: 24,
+            'font-size': 9,
+            'text-max-width': 50
+          }
+        },
+        {
+          selector: 'node[kind = "variable"]',
+          style: {
+            'background-color': theme.variable,
             shape: 'round-rectangle',
             width: 52,
             height: 22,
@@ -238,106 +251,112 @@ export function getCytoscapeStyleBuilderScript(): string {
           }
         },
         {
-          selector: 'node[kind = "variable"]',
-          style: {
-            'background-color': theme.variable,
-            shape: 'round-rectangle',
-            width: 48,
-            height: 20,
-            'font-size': 9,
-            'text-max-width': 40
-          }
-        },
-        {
           selector: 'node[kind = "file"]',
           style: {
             'background-color': isLight ? '#FFFFFF' : theme.file,
             shape: 'round-rectangle',
-            width: 124,
-            height: 36,
-            padding: 0,
+            width: 'mapData(degree, 0, 12, 112, 168)',
+            height: 'mapData(degree, 0, 12, 38, 48)',
             'font-size': 11,
             'font-weight': 700,
             'text-valign': 'center',
             'text-halign': 'center',
-            'text-margin-y': 0,
-            'text-max-width': 112,
-            'border-width': 2,
+            'text-max-width': 148,
+            'border-width': 1.5,
             'border-color': theme.fileBorder,
             color: theme.fileText,
             'text-outline-width': 0,
             'background-opacity': 1,
             'underlay-color': theme.fileBorder,
-            'underlay-opacity': isLight ? 0.12 : 0.2,
-            'underlay-padding': 3
+            'underlay-opacity': isLight ? 0.08 : 0.16,
+            'underlay-padding': 4
           }
         },
         { selector: 'node.cy-hide-label', style: { label: '' } },
         {
           selector: 'edge',
           style: {
-            width: 1.8,
+            width: 1.4,
             'line-color': theme.muted,
             'target-arrow-color': theme.muted,
             'target-arrow-shape': 'triangle',
-            'arrow-scale': 0.75,
+            'arrow-scale': 0.7,
             'curve-style': 'bezier',
-            'control-point-step-size': 48,
-            opacity: 0.72,
+            'control-point-step-size': 56,
+            opacity: 0.42,
             label: '',
             'font-size': 8,
             'font-weight': 600,
             color: theme.edgeLabel,
             'text-rotation': 'autorotate',
-            'text-margin-y': -6,
+            'text-margin-y': -7,
             'text-background-color': theme.edgeLabelBg,
-            'text-background-opacity': 0.95,
+            'text-background-opacity': 0.92,
             'text-background-padding': 2,
-            'text-background-shape': 'roundrectangle'
+            'text-background-shape': 'roundrectangle',
+            'transition-property': 'opacity, width',
+            'transition-duration': '120ms'
           }
         },
         {
-          selector: 'edge[label = "imports"]',
-          style: { 'line-color': theme.imports, 'target-arrow-color': theme.imports, width: 2, opacity: 0.8 }
+          selector: 'edge.cy-overview-edge',
+          style: {
+            'curve-style': 'round-taxi',
+            'taxi-direction': 'auto',
+            'taxi-turn': 24,
+            'taxi-turn-min-distance': 16,
+            width: 'mapData(weight, 1, 8, 1.6, 3.2)',
+            opacity: 0.55
+          }
         },
         {
-          selector: 'edge[label = "calls"]',
-          style: { 'line-color': theme.calls, 'target-arrow-color': theme.calls, width: 2, opacity: 0.8 }
+          selector: 'edge[label = "imports"], edge[kind = "imports"]',
+          style: { 'line-color': theme.imports, 'target-arrow-color': theme.imports }
         },
         {
-          selector: 'edge[label = "uses"]',
-          style: { 'line-color': theme.uses, 'target-arrow-color': theme.uses, width: 1.6, opacity: 0.7 }
+          selector: 'edge[label = "calls"], edge[kind = "calls"]',
+          style: { 'line-color': theme.calls, 'target-arrow-color': theme.calls }
         },
         {
-          selector: 'edge[label = "extends"]',
-          style: { 'line-color': theme.extends, 'target-arrow-color': theme.extends, width: 2, opacity: 0.8 }
+          selector: 'edge[label = "uses"], edge[kind = "uses"]',
+          style: { 'line-color': theme.uses, 'target-arrow-color': theme.uses, opacity: 0.38 }
         },
         {
-          selector: 'edge[label = "defines"]',
+          selector: 'edge[label = "extends"], edge[kind = "extends"]',
+          style: { 'line-color': theme.extends, 'target-arrow-color': theme.extends }
+        },
+        {
+          selector: 'edge[label = "defines"], edge[kind = "defines"]',
           style: { display: 'none' }
         },
         {
           selector: 'edge.cy-show-label',
-          style: { label: 'data(label)' }
+          style: { label: 'data(label)', opacity: 0.9 }
         },
         { selector: '.cy-node-hidden', style: { display: 'none' } },
         { selector: '.cy-edge-hidden', style: { display: 'none' } },
         {
+          selector: '.cy-faded',
+          style: { opacity: 0.14 }
+        },
+        {
           selector: '.cy-node-match',
           style: {
-            'border-width': 3,
+            'border-width': 2.5,
             'border-color': theme.selection,
-            label: 'data(label)'
+            label: 'data(label)',
+            opacity: 1
           }
         },
         {
           selector: 'node:selected',
           style: {
-            'border-width': 3,
+            'border-width': 2.5,
             'border-color': theme.selection,
             'overlay-color': theme.accent,
-            'overlay-opacity': 0.14,
-            label: 'data(label)'
+            'overlay-opacity': 0.16,
+            label: 'data(label)',
+            opacity: 1
           }
         },
         {
@@ -345,12 +364,12 @@ export function getCytoscapeStyleBuilderScript(): string {
           style: {
             label: 'data(label)',
             opacity: 1,
-            width: 2.6
+            width: 2.8
           }
         },
         {
           selector: 'node:active',
-          style: { label: 'data(label)' }
+          style: { label: 'data(label)', opacity: 1 }
         }
       ];
     }

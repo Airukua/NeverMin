@@ -7,6 +7,15 @@
   "author": {
     "name": "Abdul Wahid Rukua"
   },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/abdulwahidrukua/NeverMIN"
+  },
+  "bugs": {
+    "url": "https://github.com/abdulwahidrukua/NeverMIN/issues"
+  },
+  "homepage": "https://github.com/abdulwahidrukua/NeverMIN#readme",
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -16,65 +25,188 @@
   ],
   "activationEvents": [
     "onStartupFinished",
-    "onView:nevermin.explorer",
-    "onCommand:nevermin.explainSelection",
-    "onCommand:nevermin.analyzeRepo",
-    "onCommand:nevermin.analyzeSelectedFiles",
-    "onCommand:nevermin.selectAllAnalysisFiles",
-    "onCommand:nevermin.refreshSidebar",
-    "onCommand:nevermin.openSettings",
-    "onCommand:nevermin.setApiKey",
-    "onCommand:nevermin.openGraphInsight",
-    "onCommand:nevermin.openInsightsNarrative",
-    "onCommand:nevermin.useGemini",
-    "onCommand:nevermin.useDeepSeek"
+    "onView:nevermin.explorer"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "nevermin.explainSelection",
-        "title": "NeverMIN: Jelaskan Kode Ini"
+        "title": "NeverMIN: Jelaskan Kode Ini",
+        "category": "NeverMIN"
       },
       {
         "command": "nevermin.analyzeRepo",
-        "title": "NeverMIN: Analisis Struktur Repo"
+        "title": "NeverMIN: Analisis Struktur Repo",
+        "category": "NeverMIN"
+      },
+      {
+        "command": "nevermin.rerunAnalysis",
+        "title": "NeverMIN: Hapus & Rerun Analisis",
+        "category": "NeverMIN"
+      },
+      {
+        "command": "nevermin.clearAnalysisResults",
+        "title": "NeverMIN: Hapus Hasil Analisis",
+        "category": "NeverMIN"
+      },
+      {
+        "command": "nevermin.wipeWorkspaceData",
+        "title": "NeverMIN: Wipe Workspace Data",
+        "category": "NeverMIN"
       },
       {
         "command": "nevermin.analyzeSelectedFiles",
-        "title": "NeverMIN: Pilih File untuk Dianalisis"
+        "title": "NeverMIN: Pilih File untuk Dianalisis",
+        "category": "NeverMIN"
       },
       {
         "command": "nevermin.selectAllAnalysisFiles",
-        "title": "NeverMIN: Centang Semua File"
+        "title": "NeverMIN: Centang Semua File",
+        "category": "NeverMIN"
+      },
+      {
+        "command": "nevermin.clearAnalysisSelection",
+        "title": "NeverMIN: Kosongkan Centang File",
+        "category": "NeverMIN"
       },
       {
         "command": "nevermin.refreshSidebar",
-        "title": "NeverMIN: Refresh Sidebar"
+        "title": "NeverMIN: Refresh Sidebar",
+        "category": "NeverMIN",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "nevermin.openOutputLogs",
+        "title": "NeverMIN: Buka Output Logs",
+        "category": "NeverMIN"
+      },
+      {
+        "command": "nevermin.clearActivityLogs",
+        "title": "NeverMIN: Bersihkan Logs",
+        "category": "NeverMIN"
       },
       {
         "command": "nevermin.openSettings",
-        "title": "NeverMIN: Buka Settings"
+        "title": "NeverMIN: Buka Settings",
+        "category": "NeverMIN"
       },
       {
         "command": "nevermin.setApiKey",
-        "title": "NeverMIN: Simpan API Key"
+        "title": "NeverMIN: Simpan API Key",
+        "category": "NeverMIN"
       },
       {
         "command": "nevermin.openInsightsNarrative",
-        "title": "NeverMIN: Buka Ringkasan Insights"
+        "title": "NeverMIN: Buka Ringkasan Insights",
+        "category": "NeverMIN"
       },
       {
         "command": "nevermin.openGraphInsight",
-        "title": "NeverMIN: Buka Insight Graph"
+        "title": "NeverMIN: Buka Insight Graph",
+        "category": "NeverMIN"
+      },
+      {
+        "command": "nevermin.openMainFlowDiagram",
+        "title": "NeverMIN: Buka Flow Utama (Mermaid)",
+        "category": "NeverMIN"
+      },
+      {
+        "command": "nevermin.openLearningMindMap",
+        "title": "NeverMIN: Buka Mind Map Belajar",
+        "category": "NeverMIN"
+      },
+      {
+        "command": "nevermin.openFileFunctionGraph",
+        "title": "NeverMIN: Buka Graph Fungsi File",
+        "category": "NeverMIN"
+      },
+      {
+        "command": "nevermin.analyzeGitHistory",
+        "title": "NeverMIN: Analisis Git History",
+        "category": "NeverMIN"
+      },
+      {
+        "command": "nevermin.rerunGitHistory",
+        "title": "NeverMIN: Hapus & Rerun Git History",
+        "category": "NeverMIN"
+      },
+      {
+        "command": "nevermin.clearGitHistoryResults",
+        "title": "NeverMIN: Hapus Hasil Git History",
+        "category": "NeverMIN"
+      },
+      {
+        "command": "nevermin.openGitHistoryNarrative",
+        "title": "NeverMIN: Buka Ringkasan Git History",
+        "category": "NeverMIN"
+      },
+      {
+        "command": "nevermin.openGitHistoryFile",
+        "title": "NeverMIN: Buka File dari Git History",
+        "category": "NeverMIN"
+      },
+      {
+        "command": "nevermin.selectLanguage",
+        "title": "NeverMIN: Pilih Bahasa / Choose Language",
+        "category": "NeverMIN"
+      },
+      {
+        "command": "nevermin.selectProvider",
+        "title": "NeverMIN: Pilih LLM Provider",
+        "category": "NeverMIN"
+      },
+      {
+        "command": "nevermin.selectOllamaModel",
+        "title": "NeverMIN: Pilih Model Ollama",
+        "category": "NeverMIN"
+      },
+      {
+        "command": "nevermin.choosePrivacyMode",
+        "title": "NeverMIN: Choose Private / Public Codebase",
+        "category": "NeverMIN"
+      },
+      {
+        "command": "nevermin.setPrivacyPrivate",
+        "title": "NeverMIN: Use Private Codebase Mode",
+        "category": "NeverMIN"
+      },
+      {
+        "command": "nevermin.setPrivacyPublic",
+        "title": "NeverMIN: Use Public Codebase Mode",
+        "category": "NeverMIN"
       },
       {
         "command": "nevermin.useGemini",
-        "title": "NeverMIN: Pakai Gemini"
+        "title": "NeverMIN: Pakai Gemini",
+        "category": "NeverMIN"
       },
       {
         "command": "nevermin.useDeepSeek",
-        "title": "NeverMIN: Pakai DeepSeek"
+        "title": "NeverMIN: Pakai DeepSeek",
+        "category": "NeverMIN"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "nevermin.explainSelection",
+          "group": "nevermin@1",
+          "when": "editorHasSelection || editorTextFocus"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "nevermin.refreshSidebar",
+          "when": "view == nevermin.explorer",
+          "group": "navigation"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "nevermin.explorer",
+        "contents": "Start by choosing how NeverMIN may analyze this workspace.\n[Private codebase](command:nevermin.setPrivacyPrivate)\n[Public codebase](command:nevermin.setPrivacyPublic)\n\nOr open a folder first:\n[Open Folder](command:workbench.action.files.openFolder)"
       }
     ],
     "viewsContainers": {
@@ -101,19 +233,74 @@
           "type": "string",
           "enum": [
             "gemini",
-            "deepseek"
+            "openai",
+            "anthropic",
+            "openrouter",
+            "deepseek",
+            "groq",
+            "mistral",
+            "together",
+            "xai",
+            "ollama"
+          ],
+          "enumDescriptions": [
+            "Google Gemini (generateContent)",
+            "OpenAI Chat Completions",
+            "Anthropic Claude Messages API",
+            "OpenRouter (banyak model, satu key)",
+            "DeepSeek Chat Completions",
+            "Groq (inference cepat)",
+            "Mistral AI",
+            "Together AI",
+            "xAI Grok",
+            "Ollama lokal (tanpa API key)"
           ],
           "default": "gemini",
           "description": "Pilih LLM provider yang dipakai"
         },
+        "nevermin.language": {
+          "type": "string",
+          "enum": ["id", "en"],
+          "enumDescriptions": [
+            "Bahasa Indonesia",
+            "English"
+          ],
+          "default": "id",
+          "description": "UI and LLM response language / Bahasa UI dan jawaban LLM"
+        },
         "nevermin.apiKey": {
           "type": "string",
           "default": "",
-          "description": "API key fallback untuk provider yang dipilih. Sumber utama disimpan di SecretStorage."
+          "markdownDescription": "**Deprecated.** Prefer **NeverMIN: Simpan API Key** (SecretStorage per provider). Nilai di settings hanya fallback sementara dan akan dibersihkan setelah migrate."
+        },
+        "nevermin.maxAnalysisFiles": {
+          "type": "number",
+          "default": 500,
+          "minimum": 10,
+          "maximum": 2000,
+          "description": "Batas maksimum file yang dianalisis dalam satu run (full-repo maupun selected)."
+        },
+        "nevermin.model": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Override nama model LLM. Kosongkan untuk default provider (lihat catalog: Gemini `gemini-2.5-flash`, OpenAI `gpt-4o-mini`, Anthropic `claude-sonnet-4-5`, dll.)."
+        },
+        "nevermin.temperature": {
+          "type": "number",
+          "default": 0.2,
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Temperature sampling untuk permintaan LLM (0 = lebih deterministik)."
+        },
+        "nevermin.ollamaBaseUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:11434/v1",
+          "markdownDescription": "Base URL OpenAI-compatible untuk Ollama (hanya dipakai jika `nevermin.provider` = `ollama`)."
         }
       }
     }
   },
+  "icon": "media/icon.png",
   "scripts": {
     "postinstall": "node ./scripts/copy-grammars.js",
     "copy-grammars": "node ./scripts/copy-grammars.js",
@@ -121,22 +308,23 @@
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts",
     "test:compile": "tsc -p ./tsconfig.test.json",
-    "test:unit": "npm run test:compile && node ./dist/test/runTest.js",
+    "test:unit": "npm run test:compile && node -r ./dist/test/mocks/register.js ./dist/test/runTest.js",
     "test:e2e": "npm run test:compile && node ./dist/test/e2e/runTest.js",
     "test": "npm run test:unit",
-    "package": "npm run copy-grammars && vsce package"
+    "package": "npm run copy-grammars && node ./scripts/ensure-marketplace-icon.js && npm run compile && npx --yes @vscode/vsce package"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.0",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.90.0",
     "@vscode/test-electron": "^2.4.0",
+    "@vscode/vsce": "^3.0.0",
     "eslint": "^9.0.0",
     "mocha": "^10.0.0",
     "typescript": "^5.5.0"
   },
   "dependencies": {
-    "cytoscape": "^3.34.0",
+    "mermaid": "^10.9.6",
     "tree-sitter-wasms": "^0.1.13",
     "web-tree-sitter": "^0.26.0"
   }

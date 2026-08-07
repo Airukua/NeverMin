@@ -8,6 +8,7 @@ export interface WebviewGraphNodeData {
     filePath: string;
     startLine: number;
     endLine: number;
+    degree?: number;
   };
 }
 
@@ -17,6 +18,8 @@ export interface WebviewGraphEdgeData {
     source: string;
     target: string;
     label: string;
+    kind?: string;
+    weight?: number;
   };
 }
 
@@ -38,7 +41,8 @@ export function buildGraphPayload(graph: CodeGraph): WebviewGraphPayload {
         kind: node.kind,
         filePath: node.filePath,
         startLine: node.startLine,
-        endLine: node.endLine
+        endLine: node.endLine,
+        degree: node.kind === 'file' ? 1 : 0
       }
     })),
     edges: graph.edges.map((edge) => ({
@@ -46,7 +50,9 @@ export function buildGraphPayload(graph: CodeGraph): WebviewGraphPayload {
         id: `${edge.from}-${edge.to}-${edge.kind}`,
         source: edge.from,
         target: edge.to,
-        label: edge.kind
+        label: edge.kind,
+        kind: edge.kind,
+        weight: 1
       }
     }))
   };

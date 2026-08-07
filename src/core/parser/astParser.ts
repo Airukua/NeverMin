@@ -13,9 +13,12 @@ export interface SymbolInfo {
 let parserInitPromise: Promise<void> | null = null;
 let parserInstance: Parser | null = null;
 const languageCache = new Map<SupportedLanguage, Promise<Language>>();
-let treeSitterAvailable: boolean | null = null;
+/** Hanya true kalau init/WASM runtime gagal total — bukan error per-file. */
+let treeSitterInitFailed = false;
 let extensionRoot: string | null = null;
 let runtimeWasmLogged = false;
+/** Antrian supaya setLanguage + parse tidak saling tabrak di Promise.all. */
+let parseQueue: Promise<unknown> = Promise.resolve();
 
 /**
  * Panggil dari activate() agar WASM di-resolve dari folder extension,
@@ -23,11 +26,26 @@ let runtimeWasmLogged = false;
  */
 export function configureAstParser(options: { extensionPath: string }): void {
   extensionRoot = options.extensionPath;
-  treeSitterAvailable = null;
+  treeSitterInitFailed = false;
   languageCache.clear();
   parserInitPromise = null;
   parserInstance = null;
   runtimeWasmLogged = false;
+  parseQueue = Promise.resolve();
+}
+
+async function withParserLock<T>(fn: () => Promise<T>): Promise<T> {
+  const previous = parseQueue;
+  let release!: () => void;
+  parseQueue = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
 }
 
 function uniqueExisting(paths: string[]): string[] {
@@ -303,43 +321,47 @@ export async function extractSymbols(filePath: string, content: string): Promise
   const regexSymbols = fallbackExtractSymbols(filePath, content);
 
   if (!languageKey) {
-    // JS/JSX belum punya grammar khusus; tetap ambil symbol lewat regex.
-    if (/\.(jsx?|mjs|cjs)$/i.test(filePath)) {
-      return regexSymbols;
-    }
     return [];
   }
 
-  if (treeSitterAvailable === false) {
+  if (treeSitterInitFailed) {
     return regexSymbols;
   }
 
   try {
-    const parser = await ensureParser();
-    const language = await loadLanguage(languageKey);
-    parser.setLanguage(language);
+    return await withParserLock(async () => {
+      const parser = await ensureParser();
+      const language = await loadLanguage(languageKey);
+      parser.setLanguage(language);
 
-    const tree = parser.parse(content);
-    if (!tree) {
-      return regexSymbols;
-    }
+      const tree = parser.parse(content);
+      if (!tree) {
+        return regexSymbols;
+      }
 
     const config = getLanguageConfig(languageKey);
     const functionQuery = new Query(language, config.functionQuery);
     const classQuery = new Query(language, config.classQuery);
+    const interfaceSymbols =
+      config.interfaceQuery
+        ? collectSymbolsFromQuery(new Query(language, config.interfaceQuery), tree.rootNode, 'interface')
+        : [];
 
-    const symbols = mergeSymbols(
+    return mergeSymbols(
       [
         ...collectSymbolsFromQuery(functionQuery, tree.rootNode, 'function'),
-        ...collectSymbolsFromQuery(classQuery, tree.rootNode, 'class')
+        ...collectSymbolsFromQuery(classQuery, tree.rootNode, 'class'),
+        ...interfaceSymbols
       ],
       regexSymbols
     );
-
-    treeSitterAvailable = true;
-    return symbols;
+    });
   } catch (error) {
-    treeSitterAvailable = false;
+    const message = error instanceof Error ? error.message : String(error);
+    // Hanya matikan AST global untuk kegagalan runtime/WASM, bukan parse satu file.
+    if (/WASM|not found|Parser\.init|locateFile|Language\.load/i.test(message)) {
+      treeSitterInitFailed = true;
+    }
     console.warn(`Tree-sitter fallback for ${filePath}:`, error);
     return regexSymbols;
   }

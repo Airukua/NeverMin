@@ -1,5 +1,5 @@
 import path from 'path';
-import { extractSymbols } from '../parser/astParser';
+import { extractSymbolsCached } from '../parser/symbolCache';
 import { CodeGraph, GraphEdge, GraphNode } from './types';
 
 type GraphSymbolKind = 'function' | 'method' | 'class' | 'interface' | 'type' | 'variable';
@@ -7,6 +7,8 @@ type GraphSymbolKind = 'function' | 'method' | 'class' | 'interface' | 'type' | 
 interface RepoFile {
   path: string;
   content: string;
+  /** Root workspace untuk resolve path relatif (bukan process.cwd()). */
+  workspaceRoot?: string;
 }
 
 interface GraphSymbol {
@@ -55,10 +57,18 @@ const EDGE_PRIORITY: Record<GraphEdge['kind'], number> = {
 
 const KEYWORDS = new Set([
   'if',
+  'else',
   'for',
   'while',
+  'do',
   'switch',
+  'case',
+  'break',
+  'continue',
   'catch',
+  'try',
+  'finally',
+  'throw',
   'return',
   'function',
   'class',
@@ -79,7 +89,35 @@ const KEYWORDS = new Set([
   'from',
   'export',
   'default',
-  'extends'
+  'extends',
+  'implements',
+  'interface',
+  'type',
+  'enum',
+  'public',
+  'private',
+  'protected',
+  'static',
+  'readonly',
+  'abstract',
+  'override',
+  'true',
+  'false',
+  'null',
+  'undefined',
+  'in',
+  'of',
+  'as',
+  'with',
+  'debugger',
+  'package'
+]);
+
+/** Nama yang bukan method TS/JS meski bentuknya `name(`. */
+const METHOD_NAME_BLOCKLIST = new Set([
+  ...KEYWORDS,
+  'get',
+  'set'
 ]);
 
 /**
@@ -137,9 +175,14 @@ export async function buildRepoGraph(files: RepoFile[]): Promise<CodeGraph> {
  * supaya hasil traversal lebih berguna untuk memahami flow kode.
  */
 export function traceFrom(graph: CodeGraph, nodeId: string, maxDepth = 5): GraphNode[][] {
+  const MAX_PATHS = 40;
+  const MAX_BRANCH = 6;
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
   const outgoingByNode = new Map<string, GraphEdge[]>();
   for (const edge of graph.edges) {
+    if (edge.kind === 'defines') {
+      continue;
+    }
     const list = outgoingByNode.get(edge.from) ?? [];
     list.push(edge);
     outgoingByNode.set(edge.from, list);
@@ -148,7 +191,7 @@ export function traceFrom(graph: CodeGraph, nodeId: string, maxDepth = 5): Graph
   const paths: GraphNode[][] = [];
 
   const walk = (currentId: string, currentPath: GraphNode[], visited: Set<string>, depth: number): void => {
-    if (depth > maxDepth) {
+    if (paths.length >= MAX_PATHS || depth > maxDepth) {
       return;
     }
 
@@ -162,13 +205,16 @@ export function traceFrom(graph: CodeGraph, nodeId: string, maxDepth = 5): Graph
       .slice()
       .sort((left, right) => EDGE_PRIORITY[left.kind] - EDGE_PRIORITY[right.kind]);
 
-    const candidates = outgoing.filter((edge) => !visited.has(edge.to));
+    const candidates = outgoing.filter((edge) => !visited.has(edge.to)).slice(0, MAX_BRANCH);
     if (candidates.length === 0) {
       paths.push(nextPath);
       return;
     }
 
     for (const edge of candidates) {
+      if (paths.length >= MAX_PATHS) {
+        break;
+      }
       const nextVisited = new Set(visited);
       nextVisited.add(edge.to);
       walk(edge.to, nextPath, nextVisited, depth + 1);
@@ -181,7 +227,7 @@ export function traceFrom(graph: CodeGraph, nodeId: string, maxDepth = 5): Graph
 
 async function buildFileContext(file: RepoFile): Promise<FileContext> {
   const displayPath = normalizeDisplayPath(file.path);
-  const absolutePath = toAbsolutePath(file.path);
+  const absolutePath = toAbsolutePath(file.path, file.workspaceRoot);
   const lines = file.content.split(/\r?\n/);
   const fileNode: GraphNode = {
     id: absolutePath,
@@ -192,7 +238,7 @@ async function buildFileContext(file: RepoFile): Promise<FileContext> {
     endLine: Math.max(1, lines.length)
   };
 
-  const parsedSymbols = await extractSymbols(file.path, file.content);
+  const parsedSymbols = await extractSymbolsCached(file.path, file.content);
   const symbols: GraphSymbol[] = [];
 
   for (const symbol of parsedSymbols) {
@@ -306,12 +352,17 @@ function addSymbolFlowEdges(
     const body = sliceLines(context.lines, symbol.startLine, symbol.endLine);
     const bodyLines = body.split(/\r?\n/);
     const visibleTargets = collectVisibleTargets(context, nodesByName, nodesByFile, fileIndex);
+    const visibleNames = new Set(visibleTargets.keys());
+
     for (const line of bodyLines) {
       const callNames = collectCallNames(line);
       const jsxNames = collectJsxComponentNames(line);
-      const identifierNames = collectIdentifierNames(line);
+      const identifierNames = collectIdentifierNames(line, visibleNames);
 
       for (const callName of callNames) {
+        if (KEYWORDS.has(callName.split('.').pop() ?? callName)) {
+          continue;
+        }
         for (const target of resolveTargetsForName(callName, visibleTargets, context.absolutePath)) {
           if (target.id !== currentNode.id) {
             addEdge(currentNode.id, target.id, 'calls');
@@ -395,8 +446,18 @@ function collectVisibleTargets(
         nodesByFile,
         nodesByName
       });
-      if (resolved.length > 0) {
-        visible.set(binding.localName, resolved);
+      if (resolved.length === 0) {
+        continue;
+      }
+
+      visible.set(binding.localName, resolved);
+
+      // Namespace / default-as-namespace: izinkan resolve `ns.member`
+      if (binding.isNamespace || binding.isDefault) {
+        for (const node of resolved) {
+          const shortName = node.name.includes('.') ? (node.name.split('.').pop() ?? node.name) : node.name;
+          registerNodeName(visible, node, `${binding.localName}.${shortName}`);
+        }
       }
     }
   }
@@ -416,25 +477,68 @@ function resolveImportedNodes(params: {
   }
 
   const candidateNodes = nodesByFile.get(targetFile) ?? [];
+  const fileNodeCandidates = nodesByName.get(path.basename(targetFile)) ?? [];
 
   if (binding.isNamespace) {
-    return [];
+    // Namespace = seluruh export file; fallback ke node file bila belum ada symbol
+    if (candidateNodes.length > 0) {
+      return candidateNodes;
+    }
+    return fileNodeCandidates.filter((node) => node.kind === 'file' && toAbsolutePath(node.filePath) === targetFile);
   }
 
   if (binding.isDefault) {
     const baseName = path.basename(targetFile).replace(/\.(tsx?|jsx?|mjs|cjs|py)$/i, '');
-    const byFileName = candidateNodes.filter((node) => node.name === baseName || node.name.endsWith(`.${baseName}`));
+    const byFileName = candidateNodes.filter(
+      (node) =>
+        node.name === baseName ||
+        node.name.endsWith(`.${baseName}`) ||
+        node.name === 'default' ||
+        /^default$/i.test(node.name)
+    );
     if (byFileName.length > 0) {
       return byFileName;
     }
 
+    // Prefer class/function yang namanya mirip file; jangan sembarang ambil export pertama
+    const namedLikeFile = candidateNodes.filter(
+      (node) =>
+        (node.kind === 'function' || node.kind === 'class') &&
+        node.name.toLowerCase() === baseName.toLowerCase()
+    );
+    if (namedLikeFile.length > 0) {
+      return namedLikeFile;
+    }
+
     const exportedCallables = candidateNodes.filter((node) => node.kind === 'function' || node.kind === 'class');
-    return exportedCallables.slice(0, 1);
+    if (exportedCallables.length === 1) {
+      return exportedCallables;
+    }
+
+    return [];
   }
 
-  const exactMatches = candidateNodes.filter((node) => node.name === binding.importedName || node.name.endsWith(`.${binding.importedName}`));
+  const exactMatches = candidateNodes.filter(
+    (node) => node.name === binding.importedName || node.name.endsWith(`.${binding.importedName}`)
+  );
   if (exactMatches.length > 0) {
     return exactMatches;
+  }
+
+  // Python: from . import math → sibling module math.py di paket yang sama
+  const siblingPath = resolvePythonSiblingBinding(targetFile, binding.importedName, nodesByFile);
+  if (siblingPath) {
+    const siblingNodes = nodesByFile.get(siblingPath) ?? [];
+    if (siblingNodes.length > 0) {
+      return siblingNodes;
+    }
+    const baseName = path.basename(siblingPath);
+    const fileNode = (nodesByName.get(baseName) ?? []).find(
+      (node) => node.kind === 'file' && (node.id === siblingPath || toAbsolutePath(node.filePath) === siblingPath)
+    );
+    if (fileNode) {
+      return [fileNode];
+    }
   }
 
   const globalMatches = nodesByName.get(binding.importedName) ?? [];
@@ -443,6 +547,30 @@ function resolveImportedNodes(params: {
   }
 
   return [];
+}
+
+function resolvePythonSiblingBinding(
+  targetFile: string,
+  importedName: string,
+  nodesByFile: Map<string, GraphNode[]>
+): string | null {
+  if (!importedName || importedName === '*') {
+    return null;
+  }
+
+  const packageDir = path.dirname(targetFile);
+  const candidates = [
+    path.normalize(path.join(packageDir, `${importedName}.py`)),
+    path.normalize(path.join(packageDir, importedName, '__init__.py'))
+  ];
+
+  for (const candidate of candidates) {
+    if (nodesByFile.has(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
 }
 
 function resolveTargetsForName(
@@ -502,7 +630,7 @@ function normalizeGraphNodeKind(kind: GraphSymbolKind): GraphNode['kind'] {
   if (kind === 'method') {
     return 'method';
   }
-  if (kind === 'class') {
+  if (kind === 'class' || kind === 'interface' || kind === 'type') {
     return 'class';
   }
   if (kind === 'variable') {
@@ -563,8 +691,27 @@ function extractMethodsForClass(filePath: string, lines: string[], classSymbol: 
   const classIndent = classHeader.match(/^\s*/)?.[0].length ?? 0;
   for (let lineNumber = classSymbol.startLine + 1; lineNumber <= classSymbol.endLine; lineNumber += 1) {
     const line = lines[lineNumber - 1] ?? '';
-    const methodMatch = line.match(/^\s*(?:public\s+|private\s+|protected\s+|static\s+|async\s+|readonly\s+|\*)*([A-Za-z_$][\w$]*)\s*\(/);
+    // Skip control-flow / non-method calls that look like `name(`
+    if (/^\s*(?:else\s+)?(?:if|for|while|switch|catch|with)\s*\(/.test(line)) {
+      continue;
+    }
+
+    const methodMatch = line.match(
+      /^\s*(?:public\s+|private\s+|protected\s+|static\s+|async\s+|readonly\s+|abstract\s+|override\s+|\*|get\s+|set\s+)*([A-Za-z_$][\w$]*)\s*\(/
+    );
     if (!methodMatch) {
+      continue;
+    }
+
+    const methodName = methodMatch[1];
+    if (METHOD_NAME_BLOCKLIST.has(methodName) && methodName !== 'constructor') {
+      continue;
+    }
+
+    // Butuh tanda tangan method-ish: ada `)` lalu tipe/`{`/`;`, atau ada modifier
+    const hasModifier = /(?:public|private|protected|static|async|readonly|abstract|override|get|set)\b/.test(line);
+    const hasSignatureTail = /\)\s*(?::|[/{;]|=>)/.test(line) || /\)\s*$/.test(line.trim());
+    if (!hasModifier && !hasSignatureTail && methodName !== 'constructor') {
       continue;
     }
 
@@ -575,12 +722,12 @@ function extractMethodsForClass(filePath: string, lines: string[], classSymbol: 
 
     const endLine = Math.min(findBraceBlockEnd(lines, lineNumber), classSymbol.endLine);
     results.push({
-      name: methodMatch[1],
+      name: methodName,
       kind: 'method',
       startLine: lineNumber,
       endLine,
       parentClass: classSymbol.name,
-      qualifiedName: `${classSymbol.name}.${methodMatch[1]}`,
+      qualifiedName: `${classSymbol.name}.${methodName}`,
       signature: line.trim()
     });
   }
@@ -599,8 +746,14 @@ function parseImports(filePath: string, content: string): ImportStatement[] {
 
 function parsePythonImports(content: string): ImportStatement[] {
   const imports: ImportStatement[] = [];
+  // Gabungkan line continuation + flatten import (...) agar binding terbaca
+  const normalized = content
+    .replace(/\\\r?\n/g, '')
+    .replace(/from\s+([.\w]+)\s+import\s*\(([^)]*)\)/g, (_full, mod: string, body: string) => {
+      return `from ${mod} import ${body.replace(/\s+/g, ' ').trim()}`;
+    });
 
-  for (const line of content.split(/\r?\n/)) {
+  for (const line of normalized.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed.startsWith('import ') && !trimmed.startsWith('from ')) {
       continue;
@@ -608,17 +761,30 @@ function parsePythonImports(content: string): ImportStatement[] {
 
     const fromMatch = trimmed.match(/^from\s+([.\w]+)\s+import\s+(.+)$/);
     if (fromMatch) {
-      const moduleSpecifier = pythonModuleToSpecifier(fromMatch[1]);
-      const bindings = fromMatch[2]
+      // Pertahankan dotted Python module (jangan convert '.' → path sep)
+      const moduleSpecifier = fromMatch[1];
+      const rawBindings = fromMatch[2].trim();
+      if (rawBindings === '*') {
+        imports.push({
+          moduleSpecifier,
+          bindings: [{ importedName: '*', localName: '*', isNamespace: true }],
+          sideEffect: false
+        });
+        continue;
+      }
+
+      const bindings = rawBindings
         .split(',')
         .map((part) => part.trim())
         .filter(Boolean)
         .map((part) => {
-          const aliasMatch = part.match(/^([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/);
+          const aliasMatch = part.match(/^([A-Za-z_][\w]*)(?:\s+as\s+([A-Za-z_][\w]*))?$/);
           const importedName = aliasMatch?.[1] ?? part;
           const localName = aliasMatch?.[2] ?? importedName;
           return { importedName, localName };
-        });
+        })
+        .filter((binding) => binding.importedName !== '*');
+
       imports.push({
         moduleSpecifier,
         bindings,
@@ -627,19 +793,32 @@ function parsePythonImports(content: string): ImportStatement[] {
       continue;
     }
 
-    const importMatch = trimmed.match(/^import\s+([.\w]+)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/);
-    if (importMatch) {
-      imports.push({
-        moduleSpecifier: pythonModuleToSpecifier(importMatch[1]),
-        bindings: [
-          {
-            importedName: importMatch[1].split('.').pop() ?? importMatch[1],
-            localName: importMatch[2] ?? importMatch[1].split('.').pop() ?? importMatch[1],
-            isNamespace: true
-          }
-        ],
-        sideEffect: false
-      });
+    // import a, b as c
+    if (trimmed.startsWith('import ')) {
+      const clause = trimmed.slice('import '.length);
+      for (const part of clause.split(',')) {
+        const piece = part.trim();
+        if (!piece) {
+          continue;
+        }
+        const importMatch = piece.match(/^([.\w]+)(?:\s+as\s+([A-Za-z_][\w]*))?$/);
+        if (!importMatch) {
+          continue;
+        }
+        const moduleSpecifier = importMatch[1];
+        const shortName = moduleSpecifier.split('.').pop() ?? moduleSpecifier;
+        imports.push({
+          moduleSpecifier,
+          bindings: [
+            {
+              importedName: shortName,
+              localName: importMatch[2] ?? shortName,
+              isNamespace: true
+            }
+          ],
+          sideEffect: false
+        });
+      }
     }
   }
 
@@ -649,10 +828,14 @@ function parsePythonImports(content: string): ImportStatement[] {
 function parseJavaScriptImports(content: string): ImportStatement[] {
   const imports: ImportStatement[] = [];
   const normalized = content.replace(/\r\n/g, '\n');
-  const importPattern = /import\s+(?:([\s\S]*?)\s+from\s+)?['"]([^'"]+)['"]\s*;?/g;
 
-  for (const match of normalized.matchAll(importPattern)) {
-    const clause = (match[1] ?? '').trim();
+  // import / export … from (termasuk import type)
+  const fromPattern =
+    /(?:import|export)\s+(?:type\s+)?(?:([\s\S]*?)\s+from\s+)?['"]([^'"]+)['"]\s*;?/g;
+
+  for (const match of normalized.matchAll(fromPattern)) {
+    const rawClause = (match[1] ?? '').trim();
+    const clause = rawClause.replace(/^type\s+/, '').trim();
     const specifier = match[2];
 
     if (!clause) {
@@ -668,7 +851,7 @@ function parseJavaScriptImports(content: string): ImportStatement[] {
     const namedMatch = clause.match(/\{([\s\S]*?)\}/);
     if (namedMatch) {
       for (const part of namedMatch[1].split(',')) {
-        const trimmedPart = part.trim();
+        const trimmedPart = part.trim().replace(/^type\s+/, '');
         if (!trimmedPart) {
           continue;
         }
@@ -685,19 +868,28 @@ function parseJavaScriptImports(content: string): ImportStatement[] {
       }
     }
 
-    const defaultPart = clause.split(',')[0]?.trim();
-    if (defaultPart && !defaultPart.startsWith('{') && defaultPart !== '*' && !defaultPart.startsWith('*')) {
-      bindings.unshift({
-        importedName: 'default',
-        localName: defaultPart,
-        isDefault: true
-      });
+    const defaultPart = clause
+      .replace(/\{[\s\S]*\}/, '')
+      .replace(/\*\s+as\s+[A-Za-z_$][\w$]*/, '')
+      .split(',')
+      .map((part) => part.trim())
+      .find((part) => part && part !== 'type');
+
+    if (defaultPart && !defaultPart.startsWith('{') && defaultPart !== '*') {
+      const defaultName = defaultPart.replace(/^type\s+/, '').trim();
+      if (/^[A-Za-z_$][\w$]*$/.test(defaultName)) {
+        bindings.unshift({
+          importedName: 'default',
+          localName: defaultName,
+          isDefault: true
+        });
+      }
     }
 
     const namespaceMatch = clause.match(/\*\s+as\s+([A-Za-z_$][\w$]*)/);
     if (namespaceMatch) {
       bindings.push({
-        importedName: namespaceMatch[1],
+        importedName: '*',
         localName: namespaceMatch[1],
         isNamespace: true
       });
@@ -706,7 +898,57 @@ function parseJavaScriptImports(content: string): ImportStatement[] {
     imports.push({
       moduleSpecifier: specifier,
       bindings,
-      sideEffect: false
+      sideEffect: bindings.length === 0
+    });
+  }
+
+  // CommonJS require(...)
+  const requirePattern =
+    /(?:(?:const|let|var)\s+(?:(\{[\s\S]*?\})|([A-Za-z_$][\w$]*))\s*=\s*)?require\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+  for (const match of normalized.matchAll(requirePattern)) {
+    const namedBlock = match[1];
+    const defaultLocal = match[2];
+    const specifier = match[3];
+    const bindings: ImportBinding[] = [];
+
+    if (namedBlock) {
+      for (const part of namedBlock.replace(/[{}]/g, '').split(',')) {
+        const trimmedPart = part.trim();
+        if (!trimmedPart) {
+          continue;
+        }
+        const aliasMatch = trimmedPart.match(/^([A-Za-z_$][\w$]*)(?:\s*:\s*([A-Za-z_$][\w$]*))?$/);
+        if (!aliasMatch) {
+          continue;
+        }
+        bindings.push({
+          importedName: aliasMatch[1],
+          localName: aliasMatch[2] ?? aliasMatch[1]
+        });
+      }
+    } else if (defaultLocal) {
+      bindings.push({
+        importedName: 'default',
+        localName: defaultLocal,
+        isDefault: true,
+        isNamespace: true
+      });
+    }
+
+    imports.push({
+      moduleSpecifier: specifier,
+      bindings,
+      sideEffect: bindings.length === 0
+    });
+  }
+
+  // Dynamic import('…') — side-effect edge ke module target
+  const dynamicPattern = /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+  for (const match of normalized.matchAll(dynamicPattern)) {
+    imports.push({
+      moduleSpecifier: match[1],
+      bindings: [],
+      sideEffect: true
     });
   }
 
@@ -718,11 +960,116 @@ function resolveModuleTarget(
   moduleSpecifier: string,
   fileIndex: Map<string, FileContext>
 ): string | null {
+  if (sourceAbsolutePath.endsWith('.py')) {
+    return resolvePythonModuleTarget(sourceAbsolutePath, moduleSpecifier, fileIndex);
+  }
+
   if (moduleSpecifier.startsWith('.')) {
     return resolveRelativeModuleTarget(sourceAbsolutePath, moduleSpecifier, fileIndex);
   }
 
   return resolveAliasedModuleTarget(moduleSpecifier, fileIndex);
+}
+
+/**
+ * Resolve Python import targets:
+ * - relative: from .math / from ..pkg / from . import x
+ * - absolute within analyzed files: utils.helper → any .../utils/helper.py
+ */
+function resolvePythonModuleTarget(
+  sourceAbsolutePath: string,
+  moduleSpecifier: string,
+  fileIndex: Map<string, FileContext>
+): string | null {
+  const match = moduleSpecifier.match(/^(\.*)(.*)$/);
+  if (!match) {
+    return null;
+  }
+
+  const dotCount = match[1].length;
+  const remainder = match[2];
+
+  if (dotCount > 0) {
+    let dir = path.dirname(sourceAbsolutePath);
+    // PEP 328: satu titik = paket saat ini; tiap titik tambahan naik satu level
+    for (let index = 0; index < Math.max(0, dotCount - 1); index += 1) {
+      dir = path.dirname(dir);
+    }
+
+    if (!remainder) {
+      // from . import name → target paket (dir/__init__.py atau dir sebagai base)
+      return (
+        matchModuleCandidates(path.join(dir, '__init__'), fileIndex) ??
+        matchModuleCandidates(dir, fileIndex) ??
+        findPythonFileInDir(dir, fileIndex)
+      );
+    }
+
+    const basePath = path.join(dir, ...remainder.split('.').filter(Boolean));
+    return matchModuleCandidates(basePath, fileIndex);
+  }
+
+  if (!remainder) {
+    return null;
+  }
+
+  return findDottedPythonModule(remainder, fileIndex);
+}
+
+function findPythonFileInDir(dir: string, fileIndex: Map<string, FileContext>): string | null {
+  const normalizedDir = path.normalize(dir).replace(/\\/g, '/');
+  for (const absolutePath of fileIndex.keys()) {
+    const normalized = absolutePath.replace(/\\/g, '/');
+    if (path.dirname(normalized) === normalizedDir && normalized.endsWith('.py')) {
+      if (normalized.endsWith('/__init__.py')) {
+        return absolutePath;
+      }
+    }
+  }
+  for (const absolutePath of fileIndex.keys()) {
+    const normalized = absolutePath.replace(/\\/g, '/');
+    if (path.dirname(normalized) === normalizedDir && normalized.endsWith('.py')) {
+      return absolutePath;
+    }
+  }
+  return null;
+}
+
+function findDottedPythonModule(dottedModule: string, fileIndex: Map<string, FileContext>): string | null {
+  const segments = dottedModule.split('.').filter(Boolean);
+  if (segments.length === 0) {
+    return null;
+  }
+
+  const relativeBases = [
+    segments.join('/'),
+    `${segments.join('/')}.py`,
+    `${segments.join('/')}/__init__.py`
+  ];
+
+  for (const absolutePath of fileIndex.keys()) {
+    const normalized = absolutePath.replace(/\\/g, '/');
+    for (const relative of relativeBases) {
+      if (normalized === relative || normalized.endsWith(`/${relative}`)) {
+        return absolutePath;
+      }
+    }
+  }
+
+  // Fallback: cocokkan basename module terakhir ke file .py unik
+  const leaf = segments[segments.length - 1];
+  const leafHits: string[] = [];
+  for (const absolutePath of fileIndex.keys()) {
+    const normalized = absolutePath.replace(/\\/g, '/');
+    if (normalized.endsWith(`/${leaf}.py`) || normalized.endsWith(`/${leaf}/__init__.py`)) {
+      leafHits.push(absolutePath);
+    }
+  }
+  if (leafHits.length === 1) {
+    return leafHits[0];
+  }
+
+  return null;
 }
 
 function resolveRelativeModuleTarget(
@@ -783,7 +1130,8 @@ function expandModuleSuffixes(modulePath: string): string[] {
     `${normalized}/index.tsx`,
     `${normalized}/index.js`,
     `${normalized}/index.jsx`,
-    `${normalized}/index.py`
+    `${normalized}/index.py`,
+    `${normalized}/__init__.py`
   ];
 }
 
@@ -801,7 +1149,8 @@ function matchModuleCandidates(basePath: string, fileIndex: Map<string, FileCont
     path.join(basePath, 'index.tsx'),
     path.join(basePath, 'index.js'),
     path.join(basePath, 'index.jsx'),
-    path.join(basePath, 'index.py')
+    path.join(basePath, 'index.py'),
+    path.join(basePath, '__init__.py')
   ];
 
   for (const candidate of candidates) {
@@ -816,12 +1165,17 @@ function matchModuleCandidates(basePath: string, fileIndex: Map<string, FileCont
 
 function collectCallNames(body: string): Set<string> {
   const names = new Set<string>();
-  const directCallPattern = /\b([A-Za-z_$][\w$]*)\s*\(/g;
+  const directCallPattern = /\b([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\(/g;
   const memberCallPattern = /\.([A-Za-z_$][\w$]*)\s*\(/g;
 
   for (const match of body.matchAll(directCallPattern)) {
-    if (match[1]) {
-      names.add(match[1]);
+    if (!match[1]) {
+      continue;
+    }
+    names.add(match[1]);
+    // Juga daftarkan short name untuk `ns.foo(` → `foo`
+    if (match[1].includes('.')) {
+      names.add(match[1].split('.').pop() as string);
     }
   }
 
@@ -845,8 +1199,23 @@ function collectJsxComponentNames(body: string): Set<string> {
   return names;
 }
 
-function collectIdentifierNames(body: string): string[] {
-  return Array.from(new Set(body.match(/[A-Za-z_$][\w$]*/g) ?? [])).filter(Boolean);
+/**
+ * Hanya identifier yang terlihat di scope import/symbol (kurangi noise uses).
+ * PascalCase tetap dipertahankan untuk komponen JSX yang belum ketemu di call/JSX scan.
+ */
+function collectIdentifierNames(body: string, visibleNames: Set<string>): string[] {
+  const found = body.match(/[A-Za-z_$][\w$]*/g) ?? [];
+  const unique = Array.from(new Set(found));
+  return unique.filter((name) => {
+    if (KEYWORDS.has(name) || name.length < 2) {
+      return false;
+    }
+    if (visibleNames.has(name)) {
+      return true;
+    }
+    // Komponen / class style
+    return /^[A-Z][A-Za-z0-9]+$/.test(name);
+  });
 }
 
 function detectBaseClassName(lines: string[], startLine: number): string | undefined {
@@ -925,10 +1294,11 @@ function normalizeDisplayPath(filePath: string): string {
   return path.normalize(filePath);
 }
 
-function toAbsolutePath(filePath: string): string {
-  return path.normalize(path.resolve(process.cwd(), filePath));
-}
-
-function pythonModuleToSpecifier(modulePath: string): string {
-  return modulePath.replace(/\./g, path.sep);
+function toAbsolutePath(filePath: string, workspaceRoot?: string): string {
+  const normalized = path.normalize(filePath);
+  if (path.isAbsolute(normalized)) {
+    return normalized;
+  }
+  const root = workspaceRoot && workspaceRoot.trim().length > 0 ? workspaceRoot : process.cwd();
+  return path.normalize(path.resolve(root, normalized));
 }

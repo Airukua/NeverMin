@@ -23,7 +23,17 @@ export interface ExplainResponse {
   citedChunks: CodeChunk[];
 }
 
-export type ProviderName = 'gemini' | 'deepseek';
+export type ProviderName =
+  | 'gemini'
+  | 'openai'
+  | 'anthropic'
+  | 'openrouter'
+  | 'deepseek'
+  | 'groq'
+  | 'mistral'
+  | 'together'
+  | 'xai'
+  | 'ollama';
 
 export interface LlmProvider {
   readonly name: ProviderName;
