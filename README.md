@@ -73,7 +73,75 @@ To stay leak-free: keep `nevermin.provider` = `ollama`, or skip LLM features ent
 
 ## How to use in VS Code / Cursor
 
-### A. Run from source (development)
+### A. Install permanently in VS Code (recommended)
+
+Marketplace release is not available yet. Install from a local `.vsix` so NeverMIN stays enabled like any other extension (no F5 needed).
+
+#### 1. Build the `.vsix`
+
+Requirements: **Node.js 18+**, **npm**.
+
+```bash
+git clone https://github.com/abdulwahidrukua/NeverMIN.git
+cd NeverMIN
+npm install
+npm run package
+```
+
+This compiles the extension and writes a file such as `nevermin-0.0.1.vsix` in the repo root (version matches `package.json`).
+
+#### 2. Install into VS Code
+
+**UI**
+
+1. Open **VS Code**.
+2. Go to **Extensions** (`Ctrl+Shift+X` / `Cmd+Shift+X`).
+3. Open the `…` menu (top-right of the Extensions view).
+4. Choose **Install from VSIX…**.
+5. Select the generated `nevermin-*.vsix`.
+6. Reload VS Code if prompted.
+
+**CLI**
+
+```bash
+code --install-extension ./nevermin-0.0.1.vsix
+```
+
+For **Cursor**, use the same VSIX flow in Cursor’s Extensions view, or:
+
+```bash
+cursor --install-extension ./nevermin-0.0.1.vsix
+```
+
+#### 3. Confirm it is installed
+
+- Extensions list → search **NeverMIN** → it should show as installed and enabled.
+- Left **Activity Bar** → NeverMIN icon should appear.
+- Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) → commands starting with `NeverMIN:` should be listed.
+
+#### 4. Use it on a project
+
+1. **File → Open Folder…** and open the codebase you want to understand (not the NeverMIN extension repo, unless you are analyzing NeverMIN itself).
+2. Click the **NeverMIN** icon in the Activity Bar.
+3. First run: choose **Private codebase** (local / Ollama only) or **Public codebase** (optional cloud LLM).
+4. In the sidebar:
+   - **2. Run** → analyze the whole repo, or
+   - **3. Select Files** → check files → analyze the selection.
+5. After analysis:
+   - **4. Structure** → Folder → File → Function; click an item to open the **Functions** graph in the Code Graph webview.
+   - **5. Analysis Results** → entry / hub / main flow / mind map.
+   - **6. Git History** → optional churn / owners / coupling (needs a git repo).
+
+Optional LLM: Command Palette → `NeverMIN: Pilih LLM Provider` (prefer **Ollama** for private code). See [Everyday workflow](#everyday-workflow) and [Privacy & security](#privacy--security--analyze-without-leaking-your-code).
+
+#### 5. Update or uninstall
+
+- **Update:** pull latest code → `npm run package` → Install from VSIX again (same steps; VS Code replaces the previous version).
+- **Uninstall:** Extensions → NeverMIN → **Uninstall**.
+
+### B. Run from source (development)
+
+For hacking on NeverMIN itself (Extension Development Host):
 
 1. Clone and build:
 
@@ -89,15 +157,7 @@ npm run compile
 4. In that window, go to **File → Open Folder** and select the project you want to analyze.
 5. In the left Activity Bar, click the **NeverMIN** icon.
 
-### B. Use via a `.vsix` file (optional)
-
-```bash
-npm run package
-```
-
-Then in VS Code / Cursor: **Extensions → … → Install from VSIX…** and select the generated `.vsix` file.
-
-> No official Marketplace release yet.
+> Development Host is temporary for testing. For daily use, prefer [Install permanently](#a-install-permanently-in-vs-code-recommended) via `.vsix`.
 
 ---
 
@@ -134,7 +194,7 @@ Same commands are available via the Command Palette:
 Answers: what is alive vs frozen, why the code looks like this, who knows the area, and hidden coupling (files often committed together).
 
 1. Ensure the folder is a **git repository**.
-2. In **Run** → **Analyze Git History**, or open **5. Git History** → **Run Git History analysis**.
+2. In **Run** → **Analyze Git History**, or open **6. Git History** → **Run Git History analysis**.
 3. Results stay in the sidebar (no webview):
    - LLM summary (if Ollama or a cloud provider is configured)
    - Alive / Frozen
@@ -146,7 +206,7 @@ Command: `NeverMIN: Analisis Git History`
 
 ### 4. Read the graph results
 
-In **Analysis Results** you'll typically see:
+In **5. Analysis Results** you'll typically see:
 
 - graph statistics
 - **Main Flow** (Input → Process → Output)
@@ -158,10 +218,12 @@ Open diagrams:
 | Command | Content |
 |---------|---------|
 | `NeverMIN: Open Main Flow (Mermaid)` | flowchart of the main data flow |
-| `NeverMIN: Open Insight Graph` | architecture / module panel |
+| `NeverMIN: Open Insight Graph` | architecture / module / functions panel |
 | `NeverMIN: Open Learning Mind Map` | mind map of learning order |
 | `NeverMIN: Open Insights Summary` | insights narration |
 | `NeverMIN: Buka Ringkasan Git History` | Git History narration |
+
+Or use **4. Structure**: expand Folder → File → Function and click an item to open the focused **Functions** graph.
 
 Click a node / insight chip to jump to the related file.
 
