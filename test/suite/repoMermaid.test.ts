@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { buildRepoMermaidBundle } from '../../src/core/graph/repoMermaid';
+import { buildRepoMermaidBundle, inferNodeIcon } from '../../src/core/graph/repoMermaid';
 import { CodeGraph } from '../../src/core/graph/types';
 import { GraphInsights } from '../../src/core/graph/graphInsights';
 
@@ -153,6 +153,21 @@ function sampleInsights(): GraphInsights {
   };
 }
 
+describe('inferNodeIcon', () => {
+  it('menebak ikon dari token nama variabel', () => {
+    assert.strictEqual(inferNodeIcon('MapResponden'), 'map');
+    assert.strictEqual(inferNodeIcon('Navbar'), 'nav');
+    assert.strictEqual(inferNodeIcon('Sidebar'), 'sidebar');
+    assert.strictEqual(inferNodeIcon('Dropdown'), 'menu');
+    assert.strictEqual(inferNodeIcon('goToPrevMonth', { filePath: 'ui/form/date-picker.tsx' }), 'calendar');
+    assert.strictEqual(inferNodeIcon('UserAvatar'), 'user');
+    assert.strictEqual(inferNodeIcon('AnalyticsChart'), 'chart');
+    assert.strictEqual(inferNodeIcon('AuthProvider'), 'auth');
+    assert.strictEqual(inferNodeIcon('fetchUsers', { kind: 'function' }), 'api');
+    assert.strictEqual(inferNodeIcon('WeirdThing', { kind: 'class' }), 'class');
+  });
+});
+
 describe('buildRepoMermaidBundle', () => {
   it('membuat arsitektur berlapis Entry / Core / Pipeline / Support', () => {
     const bundle = buildRepoMermaidBundle(sampleGraph(), sampleInsights());
@@ -169,12 +184,15 @@ describe('buildRepoMermaidBundle', () => {
   it('membuat view modul antar folder', () => {
     const bundle = buildRepoMermaidBundle(sampleGraph());
     assert.ok(bundle.modules.includes('Module Map'));
+    assert.ok(bundle.views.modules.nodes.length > 0);
   });
 
   it('memakai flow insights bila tersedia', () => {
     const bundle = buildRepoMermaidBundle(sampleGraph(), sampleInsights());
     assert.ok(bundle.flow.includes('flowchart LR'));
     assert.ok(bundle.flow.includes('MainConfig'));
+    assert.ok(bundle.views.flow.nodes.length > 0);
+    assert.ok(bundle.views.architecture.nodes.length > 0);
   });
 
   it('menyisipkan penjelasan singkat LLM ke dalam kotak node', () => {
@@ -185,12 +203,33 @@ describe('buildRepoMermaidBundle', () => {
       MainConfig: 'Berfungsi sebagai entry point konfigurasi sistem.',
       KilatTrainer: 'Berfungsi sebagai orkestrator alur training.'
     };
+    insights.nodeIcons = {
+      MainConfig: 'config',
+      KilatTrainer: 'api'
+    };
     const bundle = buildRepoMermaidBundle(sampleGraph(), insights);
+    assert.ok(bundle.architecture.includes('nm-card'));
+    assert.ok(bundle.architecture.includes('nm-card-row'));
+    assert.ok(bundle.architecture.includes('data-icon='));
+    assert.ok(bundle.architecture.includes('nm-ico-wrap'));
     assert.ok(bundle.architecture.includes('entry point konfigurasi'));
     assert.ok(bundle.architecture.includes('orkestrator alur training'));
   });
 
-  it('membangun graph fungsi per file bila functionFilePath diberi', () => {
+  it('tanpa LLM summary: kartu tetap layout lengkap (bukan chip Ent)', () => {
+    const bundle = buildRepoMermaidBundle(sampleGraph(), sampleInsights());
+    assert.ok(bundle.architecture.includes('nm-card'));
+    assert.ok(bundle.architecture.includes('nm-card-head'));
+    assert.ok(bundle.architecture.includes('data-icon='));
+    assert.ok(bundle.architecture.includes('nm-card-body-pending'));
+    assert.ok(
+      /Titik masuk|Komponen |Architecture entry|Component /.test(bundle.architecture)
+    );
+    assert.ok(!bundle.architecture.includes('nm-card-chip'));
+    assert.ok(!bundle.architecture.includes('Simpul kode dalam graph'));
+  });
+
+  it('membangun graph fungsi per file bila functionFilePath diberi (Mermaid copy)', () => {
     const bundle = buildRepoMermaidBundle(sampleGraph(), sampleInsights(), {
       functionFilePath: '/app/kilat/configs/main_config.py',
       focusNodeId: '/app/kilat/configs/main_config.py#MainConfig:1'
@@ -199,9 +238,14 @@ describe('buildRepoMermaidBundle', () => {
     assert.ok(bundle.functions.includes('MainConfig'));
   });
 
-  it('fallback tab Fungsi ke entry file bila functionFilePath kosong', () => {
+  it('tab Functions: overview semua file tertutup + detail di functionGroups', () => {
     const bundle = buildRepoMermaidBundle(sampleGraph(), sampleInsights());
-    assert.ok(bundle.functions.includes('MainConfig'));
-    assert.ok(!bundle.functions.includes('sidebar Struktur'));
+    assert.ok(bundle.views.functions.nodes.length >= 1);
+    assert.ok(bundle.views.functions.nodes.every((n) => n.expandKey && n.kind === 'file-group'));
+    const keys = Object.keys(bundle.functionGroups);
+    assert.ok(keys.length >= 1);
+    const first = bundle.views.functions.nodes[0];
+    assert.ok(first.expandKey);
+    assert.ok(bundle.functionGroups[first.expandKey!].nodes.length >= 1);
   });
 });

@@ -31,7 +31,7 @@ import {
 } from '../../utils/activityLog';
 import { RepoAnalysis } from '../../core/analysis/repoAnalyzer';
 import { GraphInsightFlow, GraphInsightFlowStage } from '../../core/graph/graphInsights';
-import { buildSymbolTree, SymbolTreeFile, SymbolTreeFolder, SymbolTreeSymbol } from '../../core/graph/symbolTree';
+import { buildSymbolTree, countSymbolFiles, SymbolTreeFile, SymbolTreeFolder, SymbolTreeSymbol } from '../../core/graph/symbolTree';
 import { getCachedCodeGraph } from '../../utils/codeGraphCache';
 
 type SectionId = 'status' | 'actions' | 'files' | 'structure' | 'results' | 'gitHistory' | 'logs' | 'settings';
@@ -167,12 +167,13 @@ class StructureFolderItem extends SidebarItem {
     public readonly folder: SymbolTreeFolder
   ) {
     super(
-      folder.folderPath === '.' ? '(root)' : folder.folderPath,
+      folder.name === '.' ? '(root)' : folder.name,
       vscode.TreeItemCollapsibleState.Collapsed,
       'folder'
     );
-    this.description = t('structure.folder.files', { count: folder.files.length });
-    this.tooltip = folder.folderPath;
+    const fileCount = countSymbolFiles(folder);
+    this.description = t('structure.folder.files', { count: fileCount });
+    this.tooltip = folder.folderPath === '.' ? '(root)' : folder.folderPath;
     this.contextValue = 'structureFolder';
   }
 }
@@ -239,7 +240,10 @@ export class CodeExplorerProvider implements vscode.TreeDataProvider<ExplorerNod
     }
 
     if (element instanceof StructureFolderItem) {
-      return element.folder.files.map((file) => new StructureFileItem(file));
+      return [
+        ...element.folder.folders.map((folder) => new StructureFolderItem(folder)),
+        ...element.folder.files.map((file) => new StructureFileItem(file))
+      ];
     }
 
     if (element instanceof StructureFileItem) {
@@ -708,12 +712,17 @@ export class CodeExplorerProvider implements vscode.TreeDataProvider<ExplorerNod
       ];
     }
 
-    const folders = buildSymbolTree(graph);
-    if (folders.length === 0) {
+    const tree = buildSymbolTree(graph, {
+      workspaceRoots: (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath)
+    });
+    if (tree.folders.length === 0 && tree.files.length === 0) {
       return [new StatusItem(t('structure.emptySymbols'), 'info', t('structure.emptySymbolsHint'))];
     }
 
-    return folders.map((folder) => new StructureFolderItem(folder));
+    return [
+      ...tree.folders.map((folder) => new StructureFolderItem(folder)),
+      ...tree.files.map((file) => new StructureFileItem(file))
+    ];
   }
 
   private getFolderChildren(folder: FolderItem): ExplorerNode[] {
@@ -1065,7 +1074,13 @@ export class CodeExplorerProvider implements vscode.TreeDataProvider<ExplorerNod
     const apiKeyState = await getApiKeyState(this.context);
     const activeProvider = getProviderName();
     const privacyMode = getPrivacyMode(this.context);
-    const needsKey = activeProvider !== 'ollama' && privacyMode !== 'private';
+    const isPublic = privacyMode === 'public';
+    const onOllama = activeProvider === 'ollama';
+    // Public + masih Ollama (sisa Private) → CTA cloud key, jangan cuma pick model
+    const showCloudKeyCta = isPublic && onOllama;
+    const showApiKeyRow = isPublic && !onOllama;
+    // Model Ollama hanya relevan bila provider memang Ollama (Private atau Public yang masih lokal)
+    const showOllamaModel = onOllama;
 
     return [
       new StatusItem(
@@ -1094,13 +1109,31 @@ export class CodeExplorerProvider implements vscode.TreeDataProvider<ExplorerNod
       new StatusItem(
         `Provider: ${getProviderLabel()}`,
         'symbol-enum',
-        privacyMode === 'private' ? t('privacy.providerLocked') : undefined,
+        privacyMode === 'private'
+          ? t('privacy.providerLocked')
+          : showCloudKeyCta
+            ? t('privacy.public.stillOllama')
+            : undefined,
         {
           command: 'nevermin.selectProvider',
           title: t('sidebar.action.pickProvider')
         }
       ),
-      ...(needsKey
+      ...(showCloudKeyCta
+        ? [
+            new StatusItem(
+              t('privacy.public.pickCloud'),
+              'key',
+              t('privacy.public.pickCloudHint'),
+              {
+                command: 'nevermin.setApiKey',
+                title: t('sidebar.action.saveApiKey')
+              },
+              t('privacy.public.needCloudFirst')
+            )
+          ]
+        : []),
+      ...(showApiKeyRow
         ? [
             new StatusItem(
               apiKeyState.source === 'secretStorage'
@@ -1115,7 +1148,9 @@ export class CodeExplorerProvider implements vscode.TreeDataProvider<ExplorerNod
               this.getApiKeyTooltip(apiKeyState)
             )
           ]
-        : [
+        : []),
+      ...(showOllamaModel
+        ? [
             new StatusItem(
               t('sidebar.ollama.pickModel'),
               'server-process',
@@ -1126,15 +1161,17 @@ export class CodeExplorerProvider implements vscode.TreeDataProvider<ExplorerNod
               },
               t('sidebar.ollama.pickModelHint')
             )
-          ]),
+          ]
+        : []),
       new StatusItem(
         t('sidebar.action.openSettings'),
         'gear',
-        undefined,
+        t('sidebar.action.openSettingsHint'),
         {
           command: 'nevermin.openSettings',
           title: t('sidebar.action.openSettings')
-        }
+        },
+        t('sidebar.action.openSettingsHint')
       ),
       new StatusItem(
         t('wipe.sidebar'),
@@ -1375,11 +1412,11 @@ export class CodeExplorerProvider implements vscode.TreeDataProvider<ExplorerNod
       new StatusItem(
         `${mainFlow.input} → ${mainFlow.output}`,
         'type-hierarchy',
-        'Mermaid',
+        t('view.flow'),
         {
           command: 'nevermin.openMainFlowDiagram',
           title: t('sidebar.results.openFlow'),
-          arguments: [mainFlow]
+          arguments: []
         },
         t('sidebar.results.flowHint')
       )

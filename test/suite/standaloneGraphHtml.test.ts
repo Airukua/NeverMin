@@ -1,4 +1,5 @@
 import * as assert from 'assert';
+import { emptyGraphViews } from '../../src/core/graph/repoMermaid';
 import { buildStandaloneGraphHtml, buildStandaloneMermaidHtml } from '../../src/ui/webview/standaloneGraphHtml';
 
 describe('buildStandaloneGraphHtml', () => {
@@ -10,6 +11,8 @@ describe('buildStandaloneGraphHtml', () => {
         flow: 'flowchart LR\n  boot["boot"]',
         functions: 'flowchart TB\n  tip["Pick a file"]',
         nodeIndex: {},
+        views: emptyGraphViews(),
+        functionGroups: {},
         stats: { fileCount: 1, shownFiles: 1, edgeCount: 0, truncated: false }
       },
       'window.mermaid = { initialize(){}, async render(){ return { svg: "<svg></svg>" }; } };'

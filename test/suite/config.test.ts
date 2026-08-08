@@ -2,13 +2,15 @@ import * as assert from 'assert';
 import * as configApi from '../../src/utils/config';
 import vscodeMock = require('../mocks/vscode');
 
-const { clearApiKey, getApiKeyState, getProviderName, migrateLegacyApiKey, setApiKey, setProviderName } =
+const { clearApiKey, getApiKeyState, getEffectiveLlmModel, getProviderName, migrateLegacyApiKey, setApiKey, setLlmModel, setProviderName } =
   configApi;
 const { __resetVscodeMock, __seedSettingsApiKey, createMockExtensionContext } = vscodeMock;
 
 describe('config api key migrate', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     __resetVscodeMock();
+    // Default package.json = ollama; tes cloud key butuh provider cloud.
+    await setProviderName('gemini');
   });
 
   it('migrateLegacyApiKey memindahkan settings ke SecretStorage per-provider lalu menghapus plaintext', async () => {
@@ -19,6 +21,7 @@ describe('config api key migrate', () => {
     assert.strictEqual(migrated, true);
 
     const provider = getProviderName();
+    assert.strictEqual(provider, 'gemini');
     const state = await getApiKeyState(context as never, provider);
     assert.strictEqual(state.source, 'secretStorage');
     assert.strictEqual(state.value, 'legacy-key-from-settings');
@@ -77,5 +80,28 @@ describe('config api key migrate', () => {
     const state = await getApiKeyState(context as never, 'ollama');
     assert.strictEqual(state.source, 'secretStorage');
     assert.ok(state.value.length > 0);
+  });
+
+  it('default provider dari settings adalah ollama', () => {
+    __resetVscodeMock();
+    assert.strictEqual(getProviderName(), 'ollama');
+  });
+
+  it('getEffectiveLlmModel buang sisa model provider lain dan Gemini stale', async () => {
+    await setProviderName('gemini');
+    await setLlmModel('llama3.2:3b');
+    assert.strictEqual(getEffectiveLlmModel('gemini'), 'gemini-flash-latest');
+
+    await setLlmModel('gpt-4o-mini');
+    assert.strictEqual(getEffectiveLlmModel('gemini'), 'gemini-flash-latest');
+
+    await setLlmModel('gemini-2.5-flash');
+    assert.strictEqual(getEffectiveLlmModel('gemini'), 'gemini-flash-latest');
+
+    await setLlmModel('models/gemini-3.5-flash');
+    assert.strictEqual(getEffectiveLlmModel('gemini'), 'gemini-3.5-flash');
+
+    await setLlmModel('gemini-flash-latest');
+    assert.strictEqual(getEffectiveLlmModel('gemini'), 'gemini-flash-latest');
   });
 });

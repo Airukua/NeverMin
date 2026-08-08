@@ -1,4 +1,4 @@
-import { LlmProvider } from '../../../types';
+import { LlmCompleteOptions, LlmCompletionResult, LlmProvider } from '../../../types';
 import { RateLimiter } from '../rateLimiter';
 import {
   HttpStatusError,
@@ -9,6 +9,7 @@ import {
   setCachedPromptResponse
 } from '../promptCache';
 import { LlmProviderOptions } from '../llmOptions';
+import { normalizeGeminiTokenUsage } from '../tokenUsage';
 
 interface GeminiResponse {
   candidates?: Array<{
@@ -18,9 +19,10 @@ interface GeminiResponse {
       }>;
     };
   }>;
+  usageMetadata?: unknown;
 }
 
-const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+const DEFAULT_GEMINI_MODEL = 'gemini-flash-latest';
 
 export class GeminiProvider implements LlmProvider {
   readonly name = 'gemini' as const;
@@ -39,10 +41,18 @@ export class GeminiProvider implements LlmProvider {
     this.temperature = options.temperature ?? 0.2;
   }
 
-  async complete(prompt: string): Promise<string> {
-    const cachedResponse = getCachedPromptResponse(prompt, { namespace: this.name });
-    if (cachedResponse !== undefined) {
-      return cachedResponse;
+  async complete(
+    prompt: string,
+    options: LlmCompleteOptions = {}
+  ): Promise<LlmCompletionResult> {
+    const skipCache = Boolean(options.skipCache);
+    const cacheResponse = options.cacheResponse !== false;
+
+    if (!skipCache) {
+      const cached = getCachedPromptResponse(prompt, { namespace: this.name });
+      if (cached !== undefined) {
+        return { text: cached.response, usage: cached.usage, fromCache: true };
+      }
     }
 
     await this.rateLimiter.acquire();
@@ -51,7 +61,7 @@ export class GeminiProvider implements LlmProvider {
       throw new Error('Fetch API is not available in this runtime.');
     }
 
-    const responseText = await retryWithBackoff(async () => {
+    const result = await retryWithBackoff(async () => {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 60_000);
 
@@ -75,17 +85,31 @@ export class GeminiProvider implements LlmProvider {
         );
 
         if (!res.ok) {
-          throw new HttpStatusError(`Gemini API error: ${res.status}`, res.status, await res.text());
+          const body = await res.text();
+          const detail = body.replace(/\s+/g, ' ').trim().slice(0, 280);
+          throw new HttpStatusError(
+            detail ? `Gemini API error: ${res.status} · ${detail}` : `Gemini API error: ${res.status}`,
+            res.status,
+            body
+          );
         }
 
         const data = (await res.json()) as GeminiResponse;
-        return data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+        return {
+          text: data.candidates?.[0]?.content?.parts?.[0]?.text ?? '',
+          usage: normalizeGeminiTokenUsage(data.usageMetadata)
+        } satisfies LlmCompletionResult;
       } finally {
         clearTimeout(timeout);
       }
     });
 
-    setCachedPromptResponse(prompt, responseText, { namespace: this.name });
-    return responseText;
+    if (cacheResponse) {
+      setCachedPromptResponse(prompt, result.text, {
+        namespace: this.name,
+        usage: result.usage
+      });
+    }
+    return result;
   }
 }

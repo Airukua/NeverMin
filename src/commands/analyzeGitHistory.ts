@@ -8,27 +8,40 @@ import {
 import { buildGitHistoryExplainPrompt } from '../core/llm/promptBuilder';
 import { createLlmProvider } from '../core/llm/llmClient';
 import { t } from '../i18n';
-import {
-  getApiKey,
-  getLanguage,
-  getLlmModel,
-  getLlmTemperature,
-  getOllamaBaseUrl,
-  getProviderLabel,
-  getProviderName,
-  hasApiKey
-} from '../utils/config';
+import { getLanguage, getLlmTemperature } from '../utils/config';
 import { isGitRepository, resolveGitRoot, runGit } from '../utils/gitCli';
 import {
   getLatestGitHistory,
   saveGitHistory,
   setGitHistoryStatus
 } from '../utils/gitHistoryAnalysis';
-import { runLoggedLlmCall, summarizeNarrativeResult } from '../utils/llmActivity';
+import {
+  LlmInsightsStatus,
+  setGraphPanelGitHistory
+} from '../ui/webview/graphPanel';
+import {
+  runLoggedLlmCall,
+  summarizeNarrativeResult,
+  withCompletionUsageSummary
+} from '../utils/llmActivity';
+import { accumulateCompletionUsage, addTokenUsage } from '../core/llm/tokenUsage';
+import {
+  logSemanticRetry,
+  semanticRetryDelayMs,
+  semanticRetryPlanFor,
+  semanticRetryPromptSuffix,
+  semanticRetryTemperature,
+  shouldAbortSemanticRetryFromError,
+  sleepMs
+} from '../core/llm/semanticRetry';
+import { setCachedPromptResponse } from '../core/llm/promptCache';
+import type { LlmTokenUsage } from '../types';
 import { classifyLlmError, notifyLlmIssue } from '../utils/llmUserNotice';
+import { prepareLlmSession } from '../utils/llmSession';
 import { Logger } from '../utils/logger';
 import { showDocumentInActiveColumn } from '../utils/editorLayout';
 import { hasWorkspaceFolders } from '../utils/workspace';
+import { normalizeMarkdownSource } from '../ui/webview/markdownLite';
 
 const WINDOW_DAYS = 180;
 const MAX_COMMITS = 250;
@@ -38,15 +51,7 @@ function workspaceRoot(): string | undefined {
 }
 
 function normalizeMarkdownNarrative(raw: string): string {
-  let text = raw.trim();
-  if (!text) {
-    return '';
-  }
-  const fenced = text.match(/^```(?:markdown|md)?\s*([\s\S]*?)```$/i);
-  if (fenced) {
-    text = fenced[1].trim();
-  }
-  return text;
+  return normalizeMarkdownSource(raw);
 }
 
 async function loadCommits(repoRoot: string): Promise<ReturnType<typeof parseGitLogNameOnly>> {
@@ -68,45 +73,85 @@ async function loadCommits(repoRoot: string): Promise<ReturnType<typeof parseGit
 async function enrichWithNarrative(
   context: vscode.ExtensionContext,
   insights: GitHistoryInsights
-): Promise<GitHistoryInsights> {
-  const providerLabel = getProviderLabel();
-  if (!(await hasApiKey(context))) {
-    Logger.info('LLM lewati · git history · API key belum ada');
-    void notifyLlmIssue({ kind: 'no_key', providerLabel });
-    return insights;
+): Promise<{ insights: GitHistoryInsights; llmStatus: LlmInsightsStatus }> {
+  const prepared = await prepareLlmSession(context);
+  if (!prepared.ok) {
+    void notifyLlmIssue(prepared.issue);
+    return { insights, llmStatus: 'skipped' };
   }
 
-  try {
-    const providerName = getProviderName();
-    const model = getLlmModel() || undefined;
-    const provider = createLlmProvider(providerName, await getApiKey(context), {
-      model,
-      temperature: Math.min(getLlmTemperature(), 0.5),
-      baseUrl: providerName === 'ollama' ? getOllamaBaseUrl() : undefined
-    });
-    const narrative = await runLoggedLlmCall(
-      {
-        task: getLanguage() === 'en' ? 'git history narrative' : 'narasi git history',
-        provider: getProviderLabel(providerName),
-        model
-      },
-      () => provider.complete(buildGitHistoryExplainPrompt(insights, getLanguage())),
-      summarizeNarrativeResult
-    );
-    const normalized = normalizeMarkdownNarrative(narrative);
-    if (!normalized) {
-      void notifyLlmIssue({ kind: 'empty', providerLabel });
-      return insights;
+  const { session } = prepared;
+  const task = getLanguage() === 'en' ? 'git history narrative' : 'narasi git history';
+  const plan = semanticRetryPlanFor(session.provider);
+  const basePrompt = buildGitHistoryExplainPrompt(insights, getLanguage());
+  const baseTemp = Math.min(getLlmTemperature(), 0.5);
+  let tokenUsage: LlmTokenUsage | undefined;
+  let lastDetail = '';
+
+  for (let attempt = 0; attempt < plan.maxAttempts; attempt++) {
+    if (attempt > 0) {
+      logSemanticRetry(task, attempt + 1, plan.maxAttempts, lastDetail || 'empty');
+      await sleepMs(semanticRetryDelayMs(plan.baseDelayMs, attempt - 1));
     }
-    return { ...insights, narrative: normalized };
-  } catch (error) {
-    void notifyLlmIssue({
-      kind: classifyLlmError(error),
-      providerLabel,
-      detail: error instanceof Error ? error.message : String(error)
+
+    const prompt = `${basePrompt}${semanticRetryPromptSuffix(attempt, getLanguage())}`;
+    const provider = createLlmProvider(session.provider, session.apiKey, {
+      model: session.model,
+      temperature: semanticRetryTemperature(baseTemp, attempt),
+      baseUrl: session.baseUrl
     });
-    return insights;
+
+    try {
+      const completion = await runLoggedLlmCall(
+        {
+          task: attempt > 0 ? `${task} (retry ${attempt + 1}/${plan.maxAttempts})` : task,
+          provider: session.providerLabel,
+          model: session.model
+        },
+        () =>
+          provider.complete(prompt, {
+            skipCache: attempt > 0,
+            cacheResponse: false
+          }),
+        withCompletionUsageSummary(summarizeNarrativeResult)
+      );
+      tokenUsage = addTokenUsage(
+        tokenUsage,
+        accumulateCompletionUsage(undefined, { ...completion, fromCache: false })
+      );
+      const normalized = normalizeMarkdownNarrative(completion.text);
+      if (!normalized) {
+        lastDetail = 'empty narrative';
+        continue;
+      }
+
+      setCachedPromptResponse(basePrompt, completion.text, {
+        namespace: session.provider,
+        usage: completion.usage
+      });
+      if (attempt > 0) {
+        Logger.info(`LLM retry · ${task} · sukses pada percobaan ${attempt + 1}/${plan.maxAttempts}`);
+      }
+      return {
+        insights: { ...insights, narrative: normalized, tokenUsage },
+        llmStatus: 'ready'
+      };
+    } catch (error) {
+      lastDetail = error instanceof Error ? error.message : String(error);
+      if (shouldAbortSemanticRetryFromError(error)) {
+        void notifyLlmIssue({
+          kind: classifyLlmError(error),
+          providerLabel: session.providerLabel,
+          detail: lastDetail
+        });
+        return { insights, llmStatus: 'error' };
+      }
+    }
   }
+
+  Logger.warn(`LLM hasil · ${task} · gagal setelah ${plan.maxAttempts} percobaan`);
+  void notifyLlmIssue({ kind: 'empty', providerLabel: session.providerLabel, detail: lastDetail });
+  return { insights: { ...insights, tokenUsage }, llmStatus: 'error' };
 }
 
 export async function runGitHistoryWorkflow(context: vscode.ExtensionContext): Promise<void> {
@@ -150,11 +195,20 @@ export async function runGitHistoryWorkflow(context: vscode.ExtensionContext): P
       language: getLanguage()
     });
     await saveGitHistory(context, insights);
+    await setGraphPanelGitHistory(insights, {
+      gitLlmStatus: 'inspecting',
+      gitLlmMessage:
+        getLanguage() === 'en'
+          ? 'LLM is writing Git Insights…'
+          : 'LLM sedang menulis Git Insights…'
+    });
     await vscode.commands.executeCommand('nevermin.refreshSidebar');
 
-    insights = await enrichWithNarrative(context, insights);
+    const enriched = await enrichWithNarrative(context, insights);
+    insights = enriched.insights;
     await saveGitHistory(context, insights);
     await setGitHistoryStatus(context, 'ready');
+    await setGraphPanelGitHistory(insights, { gitLlmStatus: enriched.llmStatus });
     await vscode.commands.executeCommand('nevermin.refreshSidebar');
 
     Logger.info(

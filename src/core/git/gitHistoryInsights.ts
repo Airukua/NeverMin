@@ -1,3 +1,5 @@
+import type { LlmTokenUsage } from '../../types';
+
 export interface GitCommitRecord {
   hash: string;
   author: string;
@@ -47,6 +49,8 @@ export interface GitHistoryInsights {
   couplings: GitCouplingInsight[];
   summaryBullets: string[];
   narrative?: string;
+  /** Agregat token usage dari call LLM untuk Git Insights ini. */
+  tokenUsage?: LlmTokenUsage;
 }
 
 export interface BuildGitHistoryOptions {

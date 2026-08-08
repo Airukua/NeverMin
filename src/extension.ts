@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import path from 'path';
-import { registerExplainCommand } from './commands/explainCode';
+import { registerExplainCommand, registerExplainNodeCommand } from './commands/explainCode';
+import { registerOpenNodeFlowCommand } from './commands/openNodeFlow';
 import { registerAnalyzeRepoCommand, registerAnalyzeSelectedFilesCommand } from './commands/analyzeRepo';
 import {
   registerAnalyzeGitHistoryCommand,
@@ -18,14 +19,17 @@ import {
   getLanguageLabel,
   getProviderLabel,
   getProviderName,
+  isWritingProviderSetting,
   listProviders,
   migrateLegacyApiKey,
   setApiKey,
   setLanguage,
   setProviderName
 } from './utils/config';
-import { assertCloudLlmAllowed, ensurePrivacyModeChosen } from './utils/privacyGuards';
+import { ensurePrivacyModeChosen } from './utils/privacyGuards';
 import { hasChosenPrivacyMode, isPrivateCodebase } from './utils/privacyMode';
+import { ensureCloudProviderForPublic } from './utils/pickCloudProvider';
+import { ensureCloudAllowedOrOfferPublic } from './utils/privacyUnlock';
 import { ProviderName } from './types';
 import { Logger } from './utils/logger';
 import { clearActivity, onActivityChange } from './utils/activityLog';
@@ -36,12 +40,15 @@ import {
   setSelectedAnalysisFilePaths
 } from './utils/repoAnalysisSelection';
 import { disposeExternalGraphServers } from './ui/webview/standaloneGraphHtml';
-import { openMainFlowDiagram } from './ui/webview/flowDiagramPanel';
+import { createGraphPanel, setGraphPanelView, updateGraphPanel } from './ui/webview/graphPanel';
 import { openLearningMindMap } from './ui/webview/mindMapPanel';
 import { configureAstParser } from './core/parser/astParser';
-import { GraphInsightFlow, GraphInsights } from './core/graph/graphInsights';
+import { GraphInsights } from './core/graph/graphInsights';
 import { NEVERMIN_LANGUAGES, languageDisplayName, t } from './i18n';
-import { showDocumentInActiveColumn } from './utils/editorLayout';
+import { showDocumentInActiveColumn, preferredViewColumn } from './utils/editorLayout';
+import { getCachedCodeGraph } from './utils/codeGraphCache';
+import { getLatestRepoAnalysis } from './utils/repoAnalysis';
+import { getLatestGitHistory } from './utils/gitHistoryAnalysis';
 
 // extension.ts sengaja "bodoh" - cuma nyambungin command ke logic di ./commands
 // Semua business logic hidup di src/core, TIDAK boleh import 'vscode' di sana.
@@ -53,6 +60,8 @@ export function activate(context: vscode.ExtensionContext): { context: vscode.Ex
   Logger.info(`Tree-sitter WASM root: ${context.extensionPath}`);
 
   context.subscriptions.push(registerExplainCommand(context));
+  context.subscriptions.push(registerExplainNodeCommand(context));
+  context.subscriptions.push(registerOpenNodeFlowCommand(context));
   context.subscriptions.push(registerAnalyzeRepoCommand(context));
   context.subscriptions.push(registerAnalyzeSelectedFilesCommand(context));
   context.subscriptions.push(registerAnalyzeGitHistoryCommand(context));
@@ -181,12 +190,33 @@ export function activate(context: vscode.ExtensionContext): { context: vscode.Ex
     })
   );
   context.subscriptions.push(
-    vscode.commands.registerCommand('nevermin.openMainFlowDiagram', (flow?: GraphInsightFlow) => {
-      if (!flow?.input || !flow?.output) {
+    vscode.commands.registerCommand('nevermin.openMainFlowDiagram', async () => {
+      const switched = await setGraphPanelView('flow');
+      if (switched) {
+        return;
+      }
+
+      const graph = getCachedCodeGraph(context);
+      if (!graph || graph.nodes.length === 0) {
         vscode.window.showWarningMessage(t('msg.noMainFlow'));
         return;
       }
-      openMainFlowDiagram(flow);
+
+      const insights = getLatestRepoAnalysis(context)?.insights;
+      const gitHistory = getLatestGitHistory(context) ?? null;
+      const panel = createGraphPanel(context.extensionUri, graph, undefined, {
+        state: 'ready',
+        insights,
+        gitHistory,
+        view: 'flow'
+      });
+      await updateGraphPanel(panel, graph, {
+        state: 'ready',
+        insights,
+        gitHistory,
+        view: 'flow'
+      });
+      panel.reveal(panel.viewColumn ?? preferredViewColumn(), false);
     })
   );
   context.subscriptions.push(
@@ -195,7 +225,7 @@ export function activate(context: vscode.ExtensionContext): { context: vscode.Ex
         vscode.window.showWarningMessage(t('msg.noMindMap'));
         return;
       }
-      openLearningMindMap(insights);
+      openLearningMindMap(context.extensionUri, insights);
     })
   );
   context.subscriptions.push(
@@ -249,17 +279,19 @@ export function activate(context: vscode.ExtensionContext): { context: vscode.Ex
       if (!(await ensurePrivacyModeChosen(context))) {
         return;
       }
-      if (!assertCloudLlmAllowed(context)) {
+      if (!(await ensureCloudAllowedOrOfferPublic(context))) {
+        vscode.window.showWarningMessage(t('privacy.cloudBlocked'));
         return;
       }
-      const provider = getProviderName();
+
+      let provider = getProviderName();
       if (provider === 'ollama') {
-        const removed = await enforceOllamaNoApiKeys(context);
-        explorerProvider.refresh();
-        vscode.window.showWarningMessage(
-          t('ollama.apiKeyBlocked', { count: removed })
-        );
-        return;
+        const switched = await ensureCloudProviderForPublic(context, { forcePick: true });
+        if (!switched) {
+          vscode.window.showWarningMessage(t('privacy.public.needCloudFirst'));
+          return;
+        }
+        provider = switched;
       }
 
       const label = getProviderLabel(provider);
@@ -294,7 +326,7 @@ export function activate(context: vscode.ExtensionContext): { context: vscode.Ex
       const picked = await vscode.window.showQuickPick(
         NEVERMIN_LANGUAGES.map((id) => ({
           label: languageDisplayName(id),
-          description: id === active ? (active === 'en' ? 'Active' : 'Aktif') : id,
+          description: id === active ? t('lang.active') : id,
           language: id
         })),
         {
@@ -308,6 +340,8 @@ export function activate(context: vscode.ExtensionContext): { context: vscode.Ex
       await setLanguage(picked.language);
       explorerProvider.refresh();
       refreshSelectionMessage();
+      const { pushGraphPanelI18n } = await import('./ui/webview/graphPanel');
+      await pushGraphPanelI18n();
       vscode.window.showInformationMessage(t('lang.changed', { name: getLanguageLabel(picked.language) }));
     })
   );
@@ -317,25 +351,32 @@ export function activate(context: vscode.ExtensionContext): { context: vscode.Ex
       if (!(await ensurePrivacyModeChosen(context))) {
         return;
       }
+
+      // Private → hanya Ollama. Tawarkan ganti Public; jangan force-pick model Ollama.
       if (isPrivateCodebase(context)) {
-        vscode.window.showWarningMessage(t('privacy.cloudBlocked'));
-        await pickAndSetOllamaModel(context, { switchProvider: true });
-        explorerProvider.refresh();
-        refreshSelectionMessage();
-        return;
+        const unlocked = await ensureCloudAllowedOrOfferPublic(context);
+        if (!unlocked) {
+          vscode.window.showWarningMessage(t('privacy.providerLocked'));
+          explorerProvider.refresh();
+          refreshSelectionMessage();
+          return;
+        }
       }
 
       const active = getProviderName();
+      const privacyPublic = !isPrivateCodebase(context);
       const picked = await vscode.window.showQuickPick(
         listProviders().map((entry) => ({
           label: entry.label,
-          description: entry.id === active ? (getLanguage() === 'en' ? 'Active' : 'Aktif') : entry.id,
+          description: entry.id === active ? t('lang.active') : entry.id,
           detail: entry.description,
           provider: entry.id as ProviderName
         })),
         {
           title: t('msg.pickProvider'),
-          placeHolder: 'OpenAI, Anthropic, OpenRouter, Groq, Ollama, …',
+          placeHolder: privacyPublic
+            ? 'Gemini, OpenAI, Anthropic, OpenRouter, Ollama, …'
+            : 'Ollama (Private)',
           ignoreFocusOut: true
         }
       );
@@ -344,17 +385,33 @@ export function activate(context: vscode.ExtensionContext): { context: vscode.Ex
         return;
       }
 
+      // Guard: Private tidak boleh cloud
+      if (isPrivateCodebase(context) && picked.provider !== 'ollama') {
+        vscode.window.showWarningMessage(t('privacy.cloudBlocked'));
+        return;
+      }
+
       await setProviderName(picked.provider);
+      Logger.info(
+        `Provider dipilih · ${picked.provider} · privacy=${isPrivateCodebase(context) ? 'private' : 'public'}`
+      );
 
       if (picked.provider === 'ollama') {
-        const removed = await enforceOllamaNoApiKeys(context);
-        Logger.info(`Ollama aktif · API key cloud dihapus (${removed})`);
-        explorerProvider.refresh();
-        vscode.window.showInformationMessage(t('ollama.keysCleared', { label: picked.label, count: removed }));
-        const model = await pickAndSetOllamaModel(context);
-        if (model) {
-          explorerProvider.refresh();
+        // Private: hapus cloud keys. Public: jangan hapus — user mungkin balik ke Gemini.
+        if (isPrivateCodebase(context)) {
+          const removed = await enforceOllamaNoApiKeys(context);
+          Logger.info(`Ollama aktif (Private) · API key cloud dihapus (${removed})`);
+          vscode.window.showInformationMessage(
+            t('ollama.keysCleared', { label: picked.label, count: removed })
+          );
+        } else {
+          Logger.info('Ollama aktif (Public) · API key cloud tetap disimpan');
         }
+        const model = await pickAndSetOllamaModel(context, { switchProvider: false });
+        if (!model) {
+          vscode.window.showWarningMessage(t('ollama.pickRequired'));
+        }
+        explorerProvider.refresh();
         refreshSelectionMessage();
         return;
       }
@@ -370,7 +427,7 @@ export function activate(context: vscode.ExtensionContext): { context: vscode.Ex
       if (!(await ensurePrivacyModeChosen(context))) {
         return;
       }
-      if (!assertCloudLlmAllowed(context)) {
+      if (!(await ensureCloudAllowedOrOfferPublic(context))) {
         return;
       }
       await setProviderName('gemini');
@@ -383,7 +440,7 @@ export function activate(context: vscode.ExtensionContext): { context: vscode.Ex
       if (!(await ensurePrivacyModeChosen(context))) {
         return;
       }
-      if (!assertCloudLlmAllowed(context)) {
+      if (!(await ensureCloudAllowedOrOfferPublic(context))) {
         return;
       }
       await setProviderName('deepseek');
@@ -396,29 +453,45 @@ export function activate(context: vscode.ExtensionContext): { context: vscode.Ex
       await vscode.commands.executeCommand('workbench.action.openSettings', 'nevermin');
     })
   );
+
+  /** Private → kunci Ollama. Public → jangan sentuh provider sama sekali. */
+  let applyingProviderPolicy = false;
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration(async (event) => {
-      if (event.affectsConfiguration('nevermin.provider')) {
-        if (isPrivateCodebase(context) && getProviderName() !== 'ollama') {
+      if (!event.affectsConfiguration('nevermin.provider')) {
+        if (event.affectsConfiguration('nevermin')) {
+          explorerProvider.refresh();
+          refreshSelectionMessage();
+        }
+        return;
+      }
+
+      if (applyingProviderPolicy || isWritingProviderSetting()) {
+        return;
+      }
+
+      // PUBLIC / unset: biarkan apa pun yang user pilih (Gemini, OpenAI, …).
+      if (!isPrivateCodebase(context)) {
+        explorerProvider.refresh();
+        refreshSelectionMessage();
+        return;
+      }
+
+      // PRIVATE: hanya Ollama yang boleh.
+      if (getProviderName() !== 'ollama') {
+        applyingProviderPolicy = true;
+        try {
           await setProviderName('ollama');
           await enforceOllamaNoApiKeys(context);
           vscode.window.showWarningMessage(t('privacy.cloudBlocked'));
-          explorerProvider.refresh();
-          refreshSelectionMessage();
-          return;
-        }
-        if (getProviderName() === 'ollama') {
-          const removed = await enforceOllamaNoApiKeys(context);
-          if (removed > 0) {
-            Logger.info(`Provider Ollama via settings · hapus ${removed} API key`);
-            vscode.window.showInformationMessage(t('ollama.keysCleared', { label: 'Ollama', count: removed }));
-          }
+        } finally {
+          setTimeout(() => {
+            applyingProviderPolicy = false;
+          }, 750);
         }
       }
-      if (event.affectsConfiguration('nevermin')) {
-        explorerProvider.refresh();
-        refreshSelectionMessage();
-      }
+      explorerProvider.refresh();
+      refreshSelectionMessage();
     })
   );
   context.subscriptions.push(

@@ -108,7 +108,7 @@
       },
       {
         "command": "nevermin.openMainFlowDiagram",
-        "title": "NeverMIN: Buka Flow Utama (Mermaid)",
+        "title": "NeverMIN: Buka Tab Flow",
         "category": "NeverMIN"
       },
       {
@@ -206,7 +206,7 @@
     "viewsWelcome": [
       {
         "view": "nevermin.explorer",
-        "contents": "Start by choosing how NeverMIN may analyze this workspace.\n[Private codebase](command:nevermin.setPrivacyPrivate)\n[Public codebase](command:nevermin.setPrivacyPublic)\n\nOr open a folder first:\n[Open Folder](command:workbench.action.files.openFolder)"
+        "contents": "Start by choosing how NeverMIN may analyze this workspace.\n[Private codebase — local / Ollama](command:nevermin.setPrivacyPrivate)\n[Public codebase — cloud LLM OK](command:nevermin.setPrivacyPublic)\n\nThen open a folder and run analysis from the sidebar:\n[Open Folder](command:workbench.action.files.openFolder)\n\nTip: privacy, Structure (folder→file→function), and Git History are in the NeverMIN sidebar — not only in Settings."
       }
     ],
     "viewsContainers": {
@@ -229,9 +229,25 @@
     "configuration": {
       "title": "NeverMIN",
       "properties": {
-        "nevermin.provider": {
+        "nevermin.language": {
+          "order": 1,
           "type": "string",
           "enum": [
+            "id",
+            "en"
+          ],
+          "enumDescriptions": [
+            "Bahasa Indonesia (UI + jawaban LLM)",
+            "English (UI + LLM responses)"
+          ],
+          "default": "id",
+          "markdownDescription": "Bahasa UI sidebar/webview dan bahasa jawaban LLM.\n\nBisa juga diganti dari sidebar **Pengaturan**, atau command `NeverMIN: Pilih Bahasa`."
+        },
+        "nevermin.provider": {
+          "order": 2,
+          "type": "string",
+          "enum": [
+            "ollama",
             "gemini",
             "openai",
             "anthropic",
@@ -240,11 +256,11 @@
             "groq",
             "mistral",
             "together",
-            "xai",
-            "ollama"
+            "xai"
           ],
           "enumDescriptions": [
-            "Google Gemini (generateContent)",
+            "Ollama lokal (tanpa API key) — wajib di mode Private",
+            "Google Gemini (API key cloud)",
             "OpenAI Chat Completions",
             "Anthropic Claude Messages API",
             "OpenRouter (banyak model, satu key)",
@@ -252,50 +268,38 @@
             "Groq (inference cepat)",
             "Mistral AI",
             "Together AI",
-            "xAI Grok",
-            "Ollama lokal (tanpa API key)"
+            "xAI Grok"
           ],
-          "default": "gemini",
-          "description": "Pilih LLM provider yang dipakai"
-        },
-        "nevermin.language": {
-          "type": "string",
-          "enum": ["id", "en"],
-          "enumDescriptions": [
-            "Bahasa Indonesia",
-            "English"
-          ],
-          "default": "id",
-          "description": "UI and LLM response language / Bahasa UI dan jawaban LLM"
-        },
-        "nevermin.apiKey": {
-          "type": "string",
-          "default": "",
-          "markdownDescription": "**Deprecated.** Prefer **NeverMIN: Simpan API Key** (SecretStorage per provider). Nilai di settings hanya fallback sementara dan akan dibersihkan setelah migrate."
-        },
-        "nevermin.maxAnalysisFiles": {
-          "type": "number",
-          "default": 500,
-          "minimum": 10,
-          "maximum": 2000,
-          "description": "Batas maksimum file yang dianalisis dalam satu run (full-repo maupun selected)."
+          "default": "ollama",
+          "markdownDescription": "LLM provider aktif.\n\n**Mode privasi (sidebar, per workspace):**\n- **Private** → provider dikunci ke `ollama`, API key cloud dihapus.\n- **Public** → boleh cloud (Gemini/OpenAI/…). Jika masih Ollama setelah ganti ke Public, pilih provider cloud dulu lalu `NeverMIN: Simpan API Key`.\n\nGanti juga lewat sidebar **Pengaturan** → Provider."
         },
         "nevermin.model": {
+          "order": 3,
           "type": "string",
           "default": "",
-          "markdownDescription": "Override nama model LLM. Kosongkan untuk default provider (lihat catalog: Gemini `gemini-2.5-flash`, OpenAI `gpt-4o-mini`, Anthropic `claude-sonnet-4-5`, dll.)."
+          "markdownDescription": "Override nama model LLM. Kosongkan = default provider (mis. Ollama `llama3.2`, Gemini `gemini-flash-latest`).\n\nUntuk Ollama, lebih mudah pakai `NeverMIN: Pilih Model Ollama` (deteksi model terpasang / loaded di RAM).\n\n**Penting:** model harus cocok dengan provider aktif. Sisa model Ollama/`gemini-2.5-flash` (sering 404) akan diganti ke default provider."
         },
         "nevermin.temperature": {
+          "order": 4,
           "type": "number",
           "default": 0.2,
           "minimum": 0,
           "maximum": 2,
-          "description": "Temperature sampling untuk permintaan LLM (0 = lebih deterministik)."
+          "markdownDescription": "Temperature sampling LLM (0 = lebih deterministik). Dipakai Explain Code, narasi insights, dan ringkas node."
         },
         "nevermin.ollamaBaseUrl": {
+          "order": 5,
           "type": "string",
           "default": "http://127.0.0.1:11434/v1",
-          "markdownDescription": "Base URL OpenAI-compatible untuk Ollama (hanya dipakai jika `nevermin.provider` = `ollama`)."
+          "markdownDescription": "Base URL OpenAI-compatible untuk **Ollama** (mode Private / provider `ollama`).\n\nDefault lokal: `http://127.0.0.1:11434/v1`. NeverMIN memotong `/v1` saat memanggil API native Ollama (`/api/tags`, `/api/ps`)."
+        },
+        "nevermin.maxAnalysisFiles": {
+          "order": 6,
+          "type": "number",
+          "default": 500,
+          "minimum": 10,
+          "maximum": 2000,
+          "markdownDescription": "Batas maksimum file per run analisis (full-repo atau file tercentang di sidebar **3. Pilih File**).\n\nAnalisis membangun code graph, Structure, insights, dan diagram. Git History memakai `git` lokal terpisah."
         }
       }
     }
@@ -304,7 +308,8 @@
   "scripts": {
     "postinstall": "node ./scripts/copy-grammars.js",
     "copy-grammars": "node ./scripts/copy-grammars.js",
-    "compile": "tsc -p ./",
+    "build:webview": "npm run build --prefix webview-ui",
+    "compile": "npm run build:webview && tsc -p ./",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts",
     "test:compile": "tsc -p ./tsconfig.test.json",

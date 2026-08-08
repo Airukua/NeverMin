@@ -1,5 +1,8 @@
 import * as assert from 'assert';
-import { buildLearningMindMapMermaid } from '../../src/core/graph/learningMindMap';
+import {
+  buildLearningMindMapMermaid,
+  buildLearningMindMapModel
+} from '../../src/core/graph/learningMindMap';
 import { GraphInsights } from '../../src/core/graph/graphInsights';
 
 function emptyInsights(partial: Partial<GraphInsights> = {}): GraphInsights {
@@ -95,10 +98,18 @@ describe('learning mind map', () => {
     assert.ok(source.includes('Alur utama'));
     assert.ok(source.includes('Konsep inti'));
     assert.ok(source.includes('Store'));
+
+    const model = buildLearningMindMapModel(insights, { lang: 'id' });
+    assert.strictEqual(model.rootTitle, 'Pecahan belajar');
+    assert.ok(model.branches.some((b) => b.id === 'start' && b.children[0]?.name === 'App'));
+    assert.ok(model.branches.some((b) => b.id === 'hubs' && b.children[0]?.name === 'Store'));
+    assert.ok(model.mermaid.startsWith('mindmap'));
   });
 
   it('versi English memakai label EN', () => {
     const source = buildLearningMindMapMermaid(emptyInsights(), { lang: 'en' });
     assert.ok(source.includes('Learning breakdown') || source.includes('Run analysis first'));
+    const model = buildLearningMindMapModel(emptyInsights(), { lang: 'en' });
+    assert.strictEqual(model.rootTitle, 'Learning breakdown');
   });
 });

@@ -119,13 +119,24 @@ export async function notifyLlmIssue(issue: LlmIssue): Promise<void> {
   const saveKey = t('sidebar.action.saveApiKey');
   const openSettings = t('sidebar.action.openSettings');
   const openLogs = t('sidebar.logs.open');
+  const pickOllama = t('sidebar.ollama.pickModel');
+  const pickCloud = t('privacy.public.pickCloud');
+
+  const detailBlob = (issue.detail || '').toLowerCase();
+  const ollamaish =
+    issue.providerLabel.toLowerCase().includes('ollama') ||
+    detailBlob.includes('ollama') ||
+    detailBlob.includes('11434') ||
+    detailBlob.includes('fetch failed');
 
   const buttons =
     issue.kind === 'no_key' || issue.kind === 'auth'
       ? [saveKey, openSettings, openLogs]
       : issue.kind === 'quota'
         ? [openSettings, openLogs]
-        : [openLogs, openSettings];
+        : ollamaish
+          ? [pickOllama, pickCloud, openLogs]
+          : [openLogs, openSettings];
 
   const picked = await vscode.window.showWarningMessage(message, ...buttons);
   if (picked === saveKey) {
@@ -134,6 +145,10 @@ export async function notifyLlmIssue(issue: LlmIssue): Promise<void> {
     await vscode.commands.executeCommand('nevermin.openSettings');
   } else if (picked === openLogs) {
     await vscode.commands.executeCommand('nevermin.openOutputLogs');
+  } else if (picked === pickOllama) {
+    await vscode.commands.executeCommand('nevermin.selectOllamaModel');
+  } else if (picked === pickCloud) {
+    await vscode.commands.executeCommand('nevermin.selectProvider');
   }
 }
 

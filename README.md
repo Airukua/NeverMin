@@ -240,15 +240,20 @@ Uses the active provider. For a private repo, prefer **Ollama** so the snippet n
 
 Open **Settings** and search for `nevermin`, or run `NeverMIN: Open Settings`.
 
-| Setting | Description |
-|---------|--------------|
-| `nevermin.language` | `id` \| `en` |
-| `nevermin.provider` | LLM provider |
-| `nevermin.model` | Override model (empty = provider default) |
-| `nevermin.temperature` | Generation temperature |
-| `nevermin.maxAnalysisFiles` | File limit during analysis |
-| `nevermin.ollamaBaseUrl` | Ollama OpenAI-compatible base URL (default local) |
-| `nevermin.apiKey` | Cloud fallback only — avoided when using Ollama (keys are cleared) |
+Privacy mode (**Private / Public**) is **not** a VS Code setting — choose it in the NeverMIN sidebar (per workspace). Private locks the provider to Ollama and clears cloud API keys.
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `nevermin.language` | `id` | UI + LLM language (`id` \| `en`) |
+| `nevermin.provider` | `ollama` | LLM provider. Private mode forces `ollama`. Public allows cloud providers. |
+| `nevermin.model` | _(empty)_ | Model override; empty = provider default. For Ollama prefer `NeverMIN: Pilih Model Ollama`. |
+| `nevermin.temperature` | `0.2` | LLM sampling temperature |
+| `nevermin.ollamaBaseUrl` | `http://127.0.0.1:11434/v1` | Ollama OpenAI-compatible base URL |
+| `nevermin.maxAnalysisFiles` | `500` | Cap on files per analysis run |
+
+API keys are **not** a VS Code setting — use `NeverMIN: Simpan API Key` (SecretStorage per provider). Private / Ollama clears cloud keys automatically.
+
+Sidebar **Pengaturan** mirrors the important actions: privacy mode, language, provider, API key / Ollama model, wipe workspace data.
 
 ---
 

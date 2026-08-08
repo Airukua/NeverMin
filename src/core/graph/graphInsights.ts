@@ -2,6 +2,8 @@ import { traceFrom } from './graphBuilder';
 import { CodeGraph, EdgeKind, GraphNode, NodeKind } from './types';
 import { buildMainFlowMermaid } from './flowMermaid';
 import { NeverminLanguage } from '../../i18n/types';
+import { t } from '../../i18n';
+import type { LlmTokenUsage } from '../../types';
 import {
   callerModuleDiversity,
   computeCentrality,
@@ -74,8 +76,26 @@ export interface GraphInsights {
   stats: GraphInsightStats;
   summaryBullets: string[];
   narrative?: string;
+  /** Konten panel Insights dari LLM (menggantikan tampilan heuristik). */
+  panel?: InsightPanelContent;
   /** Penjelasan singkat per node (key = GraphNode.id atau nama). */
   nodeSummaries?: Record<string, string>;
+  /** Ikon kartu dipilih LLM (key = GraphNode.id atau nama). */
+  nodeIcons?: Record<string, string>;
+  /** Agregat token usage dari call LLM untuk insights ini. */
+  tokenUsage?: LlmTokenUsage;
+}
+
+/** Structured Insights overlay (LLM). */
+export interface InsightPanelContent {
+  purpose: string;
+  overview: string;
+  flowSteps: string[];
+  readingGuide: {
+    startHere: string;
+    followModules: string;
+    trackExecution: string;
+  };
 }
 
 interface DegreeInfo {
@@ -384,9 +404,15 @@ function pickHubs(
     toRef(
       item.node,
       Math.round(item.score * 10) / 10,
-      lang === 'en'
-        ? `PR ${(item.pr * 100).toFixed(0)}%, module-div ${(item.diversity * 100).toFixed(0)}%${item.utility ? ', util↓' : ''}`
-        : `PR ${(item.pr * 100).toFixed(0)}%, diver modul ${(item.diversity * 100).toFixed(0)}%${item.utility ? ', util↓' : ''}`
+      t(
+        'insights.hubReason',
+        {
+          pr: (item.pr * 100).toFixed(0),
+          div: (item.diversity * 100).toFixed(0),
+          util: item.utility ? t('insights.hubUtil', undefined, lang) : ''
+        },
+        lang
+      )
     )
   );
 }
@@ -396,10 +422,7 @@ function pickOrphanFiles(
   degrees: Map<string, DegreeInfo>,
   lang: NeverminLanguage
 ): GraphInsightRef[] {
-  const reason =
-    lang === 'en'
-      ? 'No imports/calls/uses relations to other files'
-      : 'Tidak punya relasi imports/calls/uses ke file lain';
+  const reason = t('insights.orphanReason', undefined, lang);
   return graph.nodes
     .filter((node) => node.kind === 'file')
     .filter((node) => {
@@ -457,74 +480,69 @@ function buildSummaryBullets(
   lang: NeverminLanguage
 ): string[] {
   const bullets: string[] = [];
-  if (lang === 'en') {
-    bullets.push(
-      `Graph has ${insights.stats.nodeCount} nodes and ${insights.stats.edgeCount} edges` +
-        ` (${insights.stats.edgesByKind.imports ?? 0} imports, ${insights.stats.edgesByKind.calls ?? 0} calls, ${insights.stats.edgesByKind.uses ?? 0} uses).`
-    );
-    if (insights.mainFlow) {
-      bullets.push(
-        `Main data flow: Input: ${insights.mainFlow.input} → Output: ${insights.mainFlow.output}`
-      );
-    } else if (insights.keyFlows.length > 0) {
-      bullets.push(`Primary flow: ${insights.keyFlows[0].label}.`);
-    }
-    if (insights.entryPoints.length > 0) {
-      bullets.push(
-        `Notable entry points: ${insights.entryPoints
-          .slice(0, 3)
-          .map((item) => item.name)
-          .join(', ')}.`
-      );
-    }
-    if (insights.hubs.length > 0) {
-      bullets.push(
-        `Frequently used hubs: ${insights.hubs
-          .slice(0, 3)
-          .map((item) => item.name)
-          .join(', ')}.`
-      );
-    }
-    if (insights.orphanFiles.length > 0) {
-      bullets.push(
-        `${insights.orphanFiles.length} files look isolated (no cross-file relations), e.g. ${insights.orphanFiles[0].name}.`
-      );
-    }
-    return bullets;
-  }
-
   bullets.push(
-    `Graph punya ${insights.stats.nodeCount} node dan ${insights.stats.edgeCount} edge` +
-      ` (${insights.stats.edgesByKind.imports ?? 0} imports, ${insights.stats.edgesByKind.calls ?? 0} calls, ${insights.stats.edgesByKind.uses ?? 0} uses).`
+    t(
+      'insights.bullet.stats',
+      {
+        nodes: insights.stats.nodeCount,
+        edges: insights.stats.edgeCount,
+        imports: insights.stats.edgesByKind.imports ?? 0,
+        calls: insights.stats.edgesByKind.calls ?? 0,
+        uses: insights.stats.edgesByKind.uses ?? 0
+      },
+      lang
+    )
   );
 
   if (insights.mainFlow) {
-    bullets.push(`Flow utama data: Input: ${insights.mainFlow.input} → Output: ${insights.mainFlow.output}`);
+    bullets.push(
+      t(
+        'insights.bullet.mainFlow',
+        { input: insights.mainFlow.input, output: insights.mainFlow.output },
+        lang
+      )
+    );
   } else if (insights.keyFlows.length > 0) {
-    bullets.push(`Alur utama: ${insights.keyFlows[0].label}.`);
+    bullets.push(t('insights.bullet.primaryFlow', { label: insights.keyFlows[0].label }, lang));
   }
 
   if (insights.entryPoints.length > 0) {
     bullets.push(
-      `Titik masuk yang menonjol: ${insights.entryPoints
-        .slice(0, 3)
-        .map((item) => item.name)
-        .join(', ')}.`
+      t(
+        'insights.bullet.entries',
+        {
+          names: insights.entryPoints
+            .slice(0, 3)
+            .map((item) => item.name)
+            .join(', ')
+        },
+        lang
+      )
     );
   }
 
   if (insights.hubs.length > 0) {
     bullets.push(
-      `Hub yang sering dipakai: ${insights.hubs
-        .slice(0, 3)
-        .map((item) => item.name)
-        .join(', ')}.`
+      t(
+        'insights.bullet.hubs',
+        {
+          names: insights.hubs
+            .slice(0, 3)
+            .map((item) => item.name)
+            .join(', ')
+        },
+        lang
+      )
     );
   }
 
   if (insights.orphanFiles.length > 0) {
     bullets.push(
-      `${insights.orphanFiles.length} file terlihat terisolasi (tanpa relasi antar-file), misalnya ${insights.orphanFiles[0].name}.`
+      t(
+        'insights.bullet.orphans',
+        { count: insights.orphanFiles.length, example: insights.orphanFiles[0].name },
+        lang
+      )
     );
   }
 

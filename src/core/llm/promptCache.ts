@@ -1,7 +1,10 @@
 import crypto from 'crypto';
+import type { LlmTokenUsage } from '../../types';
 
 interface PromptCacheEntry {
   response: string;
+  thinking?: string;
+  usage?: LlmTokenUsage;
   timestamp: number;
 }
 
@@ -11,6 +14,12 @@ interface PromptCacheOptions {
   namespace?: string;
 }
 
+export interface CachedPromptPayload {
+  response: string;
+  thinking?: string;
+  usage?: LlmTokenUsage;
+}
+
 const DEFAULT_TTL_MS = 60 * 60 * 1000;
 const MAX_ENTRIES = 200;
 const cache = new Map<string, PromptCacheEntry>();
@@ -18,7 +27,7 @@ const cache = new Map<string, PromptCacheEntry>();
 export function getCachedPromptResponse(
   prompt: string,
   options: PromptCacheOptions = {}
-): string | undefined {
+): CachedPromptPayload | undefined {
   const ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
   const clock = options.clock ?? Date.now;
   const key = createPromptCacheKey(prompt, options.namespace);
@@ -33,13 +42,13 @@ export function getCachedPromptResponse(
     return undefined;
   }
 
-  return entry.response;
+  return { response: entry.response, thinking: entry.thinking, usage: entry.usage };
 }
 
 export function setCachedPromptResponse(
   prompt: string,
   response: string,
-  options: PromptCacheOptions = {}
+  options: PromptCacheOptions & { usage?: LlmTokenUsage; thinking?: string } = {}
 ): void {
   if (!response.trim()) {
     return;
@@ -62,13 +71,19 @@ export function setCachedPromptResponse(
     }
   }
 
-  cache.set(key, { response, timestamp: clock() });
+  cache.set(key, {
+    response,
+    thinking: options.thinking,
+    usage: options.usage,
+    timestamp: clock()
+  });
 }
 
 export function clearPromptCache(): void {
   cache.clear();
 }
 
-export function createPromptCacheKey(prompt: string, namespace = ''): string {
-  return crypto.createHash('sha256').update(namespace).update('\0').update(prompt).digest('hex');
+function createPromptCacheKey(prompt: string, namespace?: string): string {
+  const hash = crypto.createHash('sha256').update(prompt).digest('hex');
+  return namespace ? `${namespace}:${hash}` : hash;
 }

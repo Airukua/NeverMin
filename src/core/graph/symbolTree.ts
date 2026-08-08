@@ -15,8 +15,18 @@ export interface SymbolTreeFile {
   symbols: SymbolTreeSymbol[];
 }
 
+/** Satu level folder — nested seperti VS Code Explorer (bukan flat path panjang). */
 export interface SymbolTreeFolder {
+  /** Label pendek: `src`, `app`, `(auth)`. */
+  name: string;
+  /** Path relatif penuh untuk tooltip: `src/app/(auth)`. */
   folderPath: string;
+  folders: SymbolTreeFolder[];
+  files: SymbolTreeFile[];
+}
+
+export interface SymbolTreeRoot {
+  folders: SymbolTreeFolder[];
   files: SymbolTreeFile[];
 }
 
@@ -26,23 +36,92 @@ function normalizePath(filePath: string): string {
   return filePath.replace(/\\/g, '/');
 }
 
-function folderOf(filePath: string): string {
-  const normalized = normalizePath(filePath);
-  const idx = normalized.lastIndexOf('/');
-  return idx >= 0 ? normalized.slice(0, idx) : '.';
-}
-
 function baseName(filePath: string): string {
   const normalized = normalizePath(filePath);
   const idx = normalized.lastIndexOf('/');
   return idx >= 0 ? normalized.slice(idx + 1) : normalized;
 }
 
-/** Susun Folder → File → fungsi/class/method dari CodeGraph. */
-export function buildSymbolTree(graph: CodeGraph, options: { maxFolders?: number; maxFilesPerFolder?: number; maxSymbolsPerFile?: number } = {}): SymbolTreeFolder[] {
-  const maxFolders = options.maxFolders ?? 40;
-  const maxFilesPerFolder = options.maxFilesPerFolder ?? 40;
+/** Path file relatif ke workspace root (mis. `src/utils/a.ts`). */
+export function relativePathForFile(filePath: string, workspaceRoots: string[] = []): string {
+  const normalized = normalizePath(filePath);
+  for (const root of workspaceRoots) {
+    const rootNorm = normalizePath(root).replace(/\/+$/, '');
+    if (!rootNorm) {
+      continue;
+    }
+    if (normalized === rootNorm) {
+      return baseName(normalized);
+    }
+    const prefix = `${rootNorm}/`;
+    if (normalized.startsWith(prefix)) {
+      return normalized.slice(prefix.length);
+    }
+  }
+  return normalized.replace(/^\.\//, '');
+}
+
+/** @deprecated pakai relativePathForFile + nested tree */
+export function folderKeyForFile(filePath: string, workspaceRoots: string[] = []): string {
+  const relative = relativePathForFile(filePath, workspaceRoots);
+  const idx = relative.lastIndexOf('/');
+  return idx >= 0 ? relative.slice(0, idx) : '.';
+}
+
+interface MutableFolder {
+  name: string;
+  folderPath: string;
+  folders: Map<string, MutableFolder>;
+  files: SymbolTreeFile[];
+}
+
+function createMutableFolder(name: string, folderPath: string): MutableFolder {
+  return { name, folderPath, folders: new Map(), files: [] };
+}
+
+function ensureChild(parent: MutableFolder, segment: string): MutableFolder {
+  let child = parent.folders.get(segment);
+  if (!child) {
+    const folderPath = parent.folderPath === '.' ? segment : `${parent.folderPath}/${segment}`;
+    child = createMutableFolder(segment, folderPath);
+    parent.folders.set(segment, child);
+  }
+  return child;
+}
+
+function freezeFolder(folder: MutableFolder, maxFilesPerFolder: number): SymbolTreeFolder {
+  return {
+    name: folder.name,
+    folderPath: folder.folderPath,
+    folders: [...folder.folders.values()]
+      .map((child) => freezeFolder(child, maxFilesPerFolder))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    files: folder.files
+      .slice()
+      .sort((a, b) => a.displayName.localeCompare(b.displayName))
+      .slice(0, maxFilesPerFolder)
+  };
+}
+
+export function countSymbolFiles(folder: SymbolTreeFolder): number {
+  return folder.files.length + folder.folders.reduce((sum, child) => sum + countSymbolFiles(child), 0);
+}
+
+/**
+ * Susun tree Folder → (subfolder | File) → fungsi/class/method.
+ * Nested seperti sidebar Explorer VS Code, bukan daftar path flat.
+ */
+export function buildSymbolTree(
+  graph: CodeGraph,
+  options: {
+    maxFilesPerFolder?: number;
+    maxSymbolsPerFile?: number;
+    workspaceRoots?: string[];
+  } = {}
+): SymbolTreeRoot {
+  const maxFilesPerFolder = options.maxFilesPerFolder ?? 80;
   const maxSymbolsPerFile = options.maxSymbolsPerFile ?? 60;
+  const workspaceRoots = options.workspaceRoots ?? [];
 
   const byFile = new Map<string, SymbolTreeSymbol[]>();
   for (const node of graph.nodes) {
@@ -62,31 +141,37 @@ export function buildSymbolTree(graph: CodeGraph, options: { maxFolders?: number
     byFile.set(filePath, list);
   }
 
-  const byFolder = new Map<string, SymbolTreeFile[]>();
+  const root = createMutableFolder('.', '.');
+
   for (const [filePath, symbols] of byFile) {
-    const folder = folderOf(filePath);
-    const files = byFolder.get(folder) ?? [];
-    files.push({
+    const relative = relativePathForFile(filePath, workspaceRoots);
+    const parts = relative.split('/').filter(Boolean);
+    if (parts.length === 0) {
+      continue;
+    }
+
+    const displayName = parts[parts.length - 1];
+    const dirSegments = parts.slice(0, -1);
+    let cursor = root;
+    for (const segment of dirSegments) {
+      cursor = ensureChild(cursor, segment);
+    }
+
+    cursor.files.push({
       filePath,
-      displayName: baseName(filePath),
+      displayName,
       symbols: symbols
         .slice()
         .sort((a, b) => a.startLine - b.startLine || a.name.localeCompare(b.name))
         .slice(0, maxSymbolsPerFile)
     });
-    byFolder.set(folder, files);
   }
 
-  return [...byFolder.entries()]
-    .map(([folderPath, files]) => ({
-      folderPath,
-      files: files
-        .slice()
-        .sort((a, b) => a.displayName.localeCompare(b.displayName))
-        .slice(0, maxFilesPerFolder)
-    }))
-    .sort((a, b) => a.folderPath.localeCompare(b.folderPath))
-    .slice(0, maxFolders);
+  const frozen = freezeFolder(root, maxFilesPerFolder);
+  return {
+    folders: frozen.folders,
+    files: frozen.files
+  };
 }
 
 export function symbolsInFile(graph: CodeGraph, filePath: string): GraphNode[] {

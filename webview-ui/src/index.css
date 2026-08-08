@@ -1,0 +1,252 @@
+@import "tailwindcss";
+
+:root {
+  --void: #0a0e17;
+  --panel: #121a2b;
+  --panel-l2: #1a2438;
+  --panel-l3: #232f49;
+  --role-entry: #2dd4bf;
+  --role-hub: #f0b429;
+  --role-pipeline: #3b82f6;
+  --role-support: #64748b;
+  --text-hi: #e8ecf4;
+  --text-lo: #7c8aa5;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--void);
+  color: var(--text-hi);
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+/* Mermaid htmlLabels still emit nm-card markup — style via utilities-adjacent CSS. */
+.nm-card {
+  box-sizing: border-box;
+  width: 280px;
+  padding: 8px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--role-support) 55%, transparent);
+  background: var(--panel);
+  color: var(--text-hi);
+  text-align: left;
+  cursor: pointer;
+}
+.nm-card-row {
+  display: flex;
+  gap: 0;
+  width: 100%;
+}
+.nm-card-icon-col {
+  display: flex;
+  width: 48px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  margin-right: 12px;
+  padding-right: 10px;
+  border-right: 1px solid color-mix(in srgb, var(--text-lo) 35%, transparent);
+}
+.nm-ico-wrap {
+  display: flex;
+  height: 40px;
+  width: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--role-support) 18%, transparent);
+  color: #94a3b8;
+  box-shadow: 0 0 14px color-mix(in srgb, var(--role-support) 22%, transparent);
+}
+.nm-card-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+}
+.nm-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.nm-card-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #fff;
+}
+.nm-card-badge {
+  display: inline-flex;
+  max-width: 100px;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  border-radius: 9999px;
+  border: 1px solid color-mix(in srgb, var(--role-support) 45%, transparent);
+  background: color-mix(in srgb, var(--role-support) 14%, transparent);
+  padding: 2px 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  color: #94a3b8;
+}
+.nm-card-badge-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nm-badge-ico {
+  display: inline-flex;
+  width: 12px;
+  height: 12px;
+}
+.nm-card-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  color: #5eead4;
+}
+.nm-card-rule {
+  height: 1px;
+  width: 100%;
+  background: color-mix(in srgb, var(--text-lo) 35%, transparent);
+}
+.nm-card-body,
+.nm-card-body-pending {
+  min-height: 2.6em;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.nm-card-body {
+  color: var(--text-hi);
+}
+.nm-card-body-pending {
+  color: var(--text-lo);
+}
+
+/* Role variants from Mermaid classDefs / node groups */
+.nm-card[data-role='entry'],
+g.node.entry .nm-card {
+  border-color: var(--role-entry);
+  box-shadow: 0 0 0 1px var(--role-entry);
+}
+.nm-card[data-role='hub'],
+g.node.hub .nm-card {
+  border-color: var(--role-hub);
+  box-shadow: 0 0 0 1px var(--role-hub);
+}
+.nm-card[data-role='pipeline'],
+g.node.pipeline .nm-card {
+  border-color: var(--role-pipeline);
+  box-shadow: 0 0 0 1px var(--role-pipeline);
+}
+
+.react-flow__controls-button {
+  background: var(--panel) !important;
+  border-bottom-color: color-mix(in srgb, var(--text-lo) 30%, transparent) !important;
+  fill: var(--text-hi) !important;
+}
+
+/* Insights / Explain LLM markdown */
+.nm-md {
+  color: var(--text-hi);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.nm-md h2,
+.nm-md h3,
+.nm-md h4 {
+  margin: 0.85rem 0 0.35rem;
+  color: #fff;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  line-height: 1.35;
+  text-transform: none;
+}
+.nm-md h2 {
+  font-size: 13px;
+  font-weight: 700;
+  text-wrap: pretty;
+}
+.nm-md h3 {
+  font-size: 12px;
+  color: #e8ecf4;
+}
+.nm-md h4 {
+  font-size: 11.5px;
+  color: var(--text-lo);
+  font-weight: 600;
+}
+.nm-md h2:first-child,
+.nm-md h3:first-child,
+.nm-md h4:first-child {
+  margin-top: 0;
+}
+.nm-md p {
+  margin: 0 0 0.7rem;
+}
+.nm-md p:last-child {
+  margin-bottom: 0;
+}
+.nm-md ul,
+.nm-md ol {
+  margin: 0 0 0.75rem;
+  padding-left: 1.15rem;
+}
+.nm-md ul {
+  list-style: disc;
+}
+.nm-md ol {
+  list-style: decimal;
+}
+.nm-md li {
+  margin: 0.25rem 0;
+}
+.nm-md li::marker {
+  color: var(--text-lo);
+}
+.nm-md strong {
+  color: #fff;
+  font-weight: 650;
+}
+.nm-md code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: #5eead4;
+  background: color-mix(in srgb, var(--panel-l2) 80%, transparent);
+  border-radius: 3px;
+  padding: 0.05em 0.3em;
+}
+.nm-md pre {
+  margin: 0 0 0.75rem;
+  padding: 0.65rem 0.75rem;
+  overflow-x: auto;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-l2) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text-lo) 22%, transparent);
+}
+.nm-md pre code {
+  padding: 0;
+  background: transparent;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: #c7d2fe;
+}
+.nm-md em {
+  color: var(--text-hi);
+  font-style: italic;
+}
+

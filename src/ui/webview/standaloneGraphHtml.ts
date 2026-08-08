@@ -2,8 +2,9 @@ import fs from 'fs/promises';
 import http from 'http';
 import crypto from 'crypto';
 import * as vscode from 'vscode';
+import { t } from '../../i18n';
 import { GraphInsights } from '../../core/graph/graphInsights';
-import { RepoMermaidBundle } from '../../core/graph/repoMermaid';
+import { emptyGraphViews, RepoMermaidBundle } from '../../core/graph/repoMermaid';
 import { escapeJsonForScript } from './jsonScriptSafe';
 
 const activeServers = new Set<http.Server>();
@@ -14,7 +15,7 @@ export async function openMermaidBundleInExternalBrowser(
   insights?: GraphInsights
 ): Promise<void> {
   if (!bundle.architecture.trim()) {
-    vscode.window.showWarningMessage('Belum ada diagram untuk dibuka di browser.');
+    vscode.window.showWarningMessage(t('standalone.noDiagram'));
     return;
   }
 
@@ -146,7 +147,6 @@ export function buildStandaloneMermaidHtml(
 </html>`;
 }
 
-/** Kompatibilitas test lama — sekarang merender Mermaid, bukan Cytoscape. */
 export function buildStandaloneGraphHtml(
   payload: { nodes?: Array<{ data?: { label?: string } }> } | unknown,
   mermaidOrCytoscapeJs: string,
@@ -166,6 +166,8 @@ export function buildStandaloneGraphHtml(
     flow: 'flowchart LR\n  demo["flow"]',
     functions: 'flowchart TB\n  demo["functions"]',
     nodeIndex: {},
+    views: emptyGraphViews(label),
+    functionGroups: {},
     stats: { fileCount: 0, shownFiles: 0, edgeCount: 0, truncated: false }
   };
   return buildStandaloneMermaidHtml(emptyBundle, mermaidOrCytoscapeJs, insights);

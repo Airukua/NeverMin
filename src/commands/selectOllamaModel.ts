@@ -11,6 +11,7 @@ import {
   setProviderName
 } from '../utils/config';
 import { Logger } from '../utils/logger';
+import { isPrivateCodebase } from '../utils/privacyMode';
 import {
   describeOllamaModel,
   detectOllamaModels,
@@ -21,14 +22,33 @@ export async function pickAndSetOllamaModel(
   context: vscode.ExtensionContext,
   options: { switchProvider?: boolean } = {}
 ): Promise<string | undefined> {
-  if (options.switchProvider || getProviderName() !== 'ollama') {
-    await setProviderName('ollama');
-    const removed = await enforceOllamaNoApiKeys(context);
-    if (removed > 0) {
-      Logger.info(`Ollama · hapus ${removed} API key cloud`);
-      vscode.window.showInformationMessage(t('ollama.keysCleared', { label: 'Ollama', count: removed }));
+  const alreadyOllama = getProviderName() === 'ollama';
+  const shouldSwitch = options.switchProvider === true || (!alreadyOllama && isPrivateCodebase(context));
+
+  if (shouldSwitch && !alreadyOllama) {
+    // Public + lagi pakai cloud: jangan silent force Ollama — konfirmasi dulu.
+    if (!isPrivateCodebase(context)) {
+      const switchLabel = t('privacy.switchToOllama');
+      const cancelLabel = t('privacy.keepCloudProvider');
+      const choice = await vscode.window.showWarningMessage(
+        t('privacy.switchToOllamaAsk'),
+        { modal: true },
+        switchLabel,
+        cancelLabel
+      );
+      if (choice !== switchLabel) {
+        return undefined;
+      }
     }
-  } else if (getProviderName() === 'ollama') {
+    await setProviderName('ollama');
+    if (isPrivateCodebase(context)) {
+      const removed = await enforceOllamaNoApiKeys(context);
+      if (removed > 0) {
+        Logger.info(`Ollama · hapus ${removed} API key cloud`);
+        vscode.window.showInformationMessage(t('ollama.keysCleared', { label: 'Ollama', count: removed }));
+      }
+    }
+  } else if (alreadyOllama && isPrivateCodebase(context)) {
     await enforceOllamaNoApiKeys(context);
   }
 
@@ -103,6 +123,7 @@ export function registerSelectOllamaModelCommand(
   context: vscode.ExtensionContext
 ): vscode.Disposable {
   return vscode.commands.registerCommand('nevermin.selectOllamaModel', async () => {
+    // Private: langsung Ollama. Public: konfirmasi dulu (lihat pickAndSetOllamaModel).
     await pickAndSetOllamaModel(context, { switchProvider: true });
   });
 }

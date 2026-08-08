@@ -87,9 +87,16 @@ describe('LLM utilities', () => {
   });
 
   it('promptCache return cached value untuk prompt identik dan miss untuk prompt beda', () => {
-    setCachedPromptResponse('prompt-a', 'response-a', { clock: () => 1000 });
+    setCachedPromptResponse('prompt-a', 'response-a', {
+      clock: () => 1000,
+      usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 }
+    });
 
-    assert.strictEqual(getCachedPromptResponse('prompt-a', { clock: () => 1000 }), 'response-a');
+    assert.deepStrictEqual(getCachedPromptResponse('prompt-a', { clock: () => 1000 }), {
+      response: 'response-a',
+      thinking: undefined,
+      usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 }
+    });
     assert.strictEqual(getCachedPromptResponse('prompt-b', { clock: () => 1000 }), undefined);
   });
 });

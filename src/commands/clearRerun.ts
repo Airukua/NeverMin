@@ -3,6 +3,7 @@ import { clearPromptCache } from '../core/llm/promptCache';
 import { t } from '../i18n';
 import { clearCachedCodeGraph } from '../utils/codeGraphCache';
 import { clearGitHistory, getLatestGitHistory } from '../utils/gitHistoryAnalysis';
+import { setGraphPanelGitHistory } from '../ui/webview/graphPanel';
 import {
   clearRepoAnalysis,
   getLastAnalysisMode,
@@ -48,6 +49,7 @@ export function registerClearRerunCommands(context: vscode.ExtensionContext): vs
       }
       clearPromptCache();
       await clearGitHistory(context);
+      await setGraphPanelGitHistory(null, { gitLlmStatus: 'idle' });
       Logger.info('Hasil Git History dihapus · prompt cache dikosongkan');
       await vscode.commands.executeCommand('nevermin.refreshSidebar');
       vscode.window.showInformationMessage(t('git.cleared'));
@@ -56,6 +58,7 @@ export function registerClearRerunCommands(context: vscode.ExtensionContext): vs
     vscode.commands.registerCommand('nevermin.rerunGitHistory', async () => {
       clearPromptCache();
       await clearGitHistory(context);
+      await setGraphPanelGitHistory(null, { gitLlmStatus: 'idle' });
       Logger.info('Rerun Git History · hasil lama + prompt cache dibuang');
       await vscode.commands.executeCommand('nevermin.refreshSidebar');
       await vscode.commands.executeCommand('nevermin.analyzeGitHistory');

@@ -26,8 +26,10 @@ describe('language support', () => {
   });
 
   it('t() mengembalikan string EN/ID', async () => {
-    assert.strictEqual(t('webview.modules', undefined, 'id'), 'Modul');
-    assert.strictEqual(t('webview.modules', undefined, 'en'), 'Modules');
+    assert.strictEqual(t('webview.mindMap', undefined, 'id'), 'Mind Map');
+    assert.strictEqual(t('webview.mindMap', undefined, 'en'), 'Mind Map');
+    assert.strictEqual(t('webview.openSource', undefined, 'id'), 'Buka sumber');
+    assert.strictEqual(t('webview.openSource', undefined, 'en'), 'Open source');
     assert.strictEqual(t('lang.changed', { name: 'English' }, 'en'), 'NeverMIN language: English');
   });
 
@@ -59,6 +61,9 @@ describe('language support', () => {
     const prompt = buildGraphInsightsPrompt(insights, 'en');
     assert.ok(prompt.includes(narrativePurposeHeading('en')));
     assert.ok(prompt.includes('This application is for'));
+    assert.ok(prompt.includes('Return ONE JSON object'));
+    assert.ok(prompt.includes('flowSteps'));
+    assert.ok(prompt.includes('readingGuide'));
     assert.ok(!prompt.includes('Bahasa Indonesia'));
 
     const nodePrompt = buildNodeSummariesPrompt(

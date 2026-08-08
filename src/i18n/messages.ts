@@ -79,6 +79,7 @@ export type MessageKey =
   | 'sidebar.action.explainHint'
   | 'sidebar.action.saveApiKey'
   | 'sidebar.action.openSettings'
+  | 'sidebar.action.openSettingsHint'
   | 'sidebar.action.pickProvider'
   | 'sidebar.action.pickLanguage'
   | 'sidebar.files.selectAll'
@@ -131,6 +132,7 @@ export type MessageKey =
   | 'ollama.modelSet'
   | 'ollama.keysCleared'
   | 'ollama.apiKeyBlocked'
+  | 'ollama.pickRequired'
   | 'privacy.gate.title'
   | 'privacy.gate.subtitle'
   | 'privacy.gate.tooltip'
@@ -145,6 +147,12 @@ export type MessageKey =
   | 'privacy.public.badge'
   | 'privacy.public.detail'
   | 'privacy.public.applied'
+  | 'privacy.public.pickCloudTitle'
+  | 'privacy.public.pickCloudPlaceholder'
+  | 'privacy.public.pickCloud'
+  | 'privacy.public.pickCloudHint'
+  | 'privacy.public.stillOllama'
+  | 'privacy.public.needCloudFirst'
   | 'privacy.mode.private'
   | 'privacy.mode.public'
   | 'privacy.mode.unset'
@@ -155,6 +163,13 @@ export type MessageKey =
   | 'privacy.changeHint'
   | 'privacy.providerLocked'
   | 'privacy.cloudBlocked'
+  | 'privacy.cloudBlockedAsk'
+  | 'privacy.switchToPublic'
+  | 'privacy.keepPrivateOllama'
+  | 'privacy.providerKept'
+  | 'privacy.switchToOllama'
+  | 'privacy.switchToOllamaAsk'
+  | 'privacy.keepCloudProvider'
   | 'wipe.sidebar'
   | 'wipe.sidebarHint'
   | 'wipe.sidebarPrivateHint'
@@ -211,6 +226,17 @@ export type MessageKey =
   | 'explain.question'
   | 'explain.done'
   | 'explain.failed'
+  | 'explain.modal.badge'
+  | 'explain.modal.loading'
+  | 'explain.modal.loadingScope'
+  | 'explain.modal.error'
+  | 'explain.modal.cancelled'
+  | 'explain.modal.empty'
+  | 'explain.modal.close'
+  | 'explain.modal.thinking'
+  | 'explain.scope.file'
+  | 'explain.scope.module'
+  | 'explain.scope.function'
   | 'analyze.fileCap'
   | 'analyze.cancelled'
   | 'analyze.noValidFiles'
@@ -236,52 +262,12 @@ export type MessageKey =
   | 'structure.openSymbolGraph'
   | 'structure.focusFile'
   | 'structure.focusSymbol'
-  | 'webview.modules'
-  | 'webview.flow'
-  | 'webview.functions'
-  | 'webview.insights'
-  | 'webview.copyMermaid'
   | 'webview.openSource'
-  | 'webview.theme'
-  | 'webview.themeLight'
-  | 'webview.themeDark'
-  | 'webview.fullFlow'
   | 'webview.mindMap'
-  | 'webview.openMindMap'
-  | 'webview.mindMapHint'
-  | 'webview.closeInsights'
-  | 'webview.zoomHint'
-  | 'webview.loadingTitle'
-  | 'webview.loadingBody'
-  | 'webview.emptyTitle'
-  | 'webview.emptyBody'
-  | 'webview.errorTitle'
-  | 'webview.errorBody'
-  | 'webview.insightsTitle'
-  | 'webview.purposeHeading'
-  | 'webview.summaryHeading'
   | 'webview.mainFlowHeading'
-  | 'webview.mainFlowEmpty'
-  | 'webview.mainFlowEmptyHint'
-  | 'webview.mainFlowWeak'
-  | 'webview.openFullFlow'
-  | 'webview.entryHeading'
-  | 'webview.hubHeading'
-  | 'webview.statsHeading'
-  | 'webview.statFiles'
-  | 'webview.statEdges'
-  | 'webview.statTotal'
-  | 'webview.statNodes'
-  | 'webview.noInsightsPurpose'
-  | 'webview.noInsightsSummary'
-  | 'webview.rendering'
-  | 'webview.noMermaid'
   | 'webview.mermaidMissing'
-  | 'webview.mermaidFail'
   | 'webview.copied'
   | 'webview.noDiagramYet'
-  | 'webview.truncateNote'
-  | 'webview.purposeFallback'
   | 'llm.empty'
   | 'llm.call'
   | 'llm.ok'
@@ -296,8 +282,150 @@ export type MessageKey =
   | 'llm.notice.partial'
   | 'llm.notice.failed'
   | 'llm.notice.failedHint'
-  | 'flow.mermaidMissing'
-  | 'flow.renderFail';
+  | 'flow.renderFail'
+  | 'lang.active'
+  | 'graph.card.entry'
+  | 'graph.card.hub'
+  | 'graph.card.output'
+  | 'graph.card.step'
+  | 'graph.card.file'
+  | 'graph.card.component'
+  | 'graph.arch.empty'
+  | 'graph.arch.section.entry'
+  | 'graph.arch.section.entryHint'
+  | 'graph.arch.section.hub'
+  | 'graph.arch.section.hubHint'
+  | 'graph.arch.section.pipeline'
+  | 'graph.arch.section.pipelineHint'
+  | 'graph.arch.section.support'
+  | 'graph.flow.empty'
+  | 'graph.flow.section.start'
+  | 'graph.flow.section.startHint'
+  | 'graph.flow.section.step'
+  | 'graph.flow.section.stepHint'
+  | 'graph.flow.section.end'
+  | 'graph.flow.section.endHint'
+  | 'graph.flow.section.other'
+  | 'graph.flow.section.otherHint'
+  | 'graph.flow.card.start'
+  | 'graph.flow.card.step'
+  | 'graph.flow.card.end'
+  | 'graph.modules.empty'
+  | 'graph.modules.summary'
+  | 'graph.functions.empty'
+  | 'graph.functions.openHint'
+  | 'graph.functions.noneInFile'
+  | 'graph.functions.pickFile'
+  | 'graph.flow.mermaidEmpty'
+  | 'graph.view.empty'
+  | 'graph.loading'
+  | 'graph.error'
+  | 'graph.none'
+  | 'graph.backAllFiles'
+  | 'graph.backNodeFlow'
+  | 'graph.panelMissing'
+  | 'graph.reactMissing'
+  | 'insights.waitingLlm'
+  | 'insights.none'
+  | 'insights.title'
+  | 'insights.subtitle'
+  | 'insights.inspecting'
+  | 'insights.openFlow'
+  | 'insights.purpose'
+  | 'insights.overview'
+  | 'insights.mainFlow'
+  | 'insights.howToRead'
+  | 'insights.startHere'
+  | 'insights.followModules'
+  | 'insights.trackExecution'
+  | 'insights.totalComponents'
+  | 'insights.tokenUsage'
+  | 'insights.tokenUsageSplit'
+  | 'insights.llmUnavailable'
+  | 'insights.llmFailed'
+  | 'insights.fallbackSkipped'
+  | 'insights.fallbackError'
+  | 'insights.structuralMode'
+  | 'insights.structuralHint'
+  | 'insights.structuralOverview'
+  | 'insights.hubs'
+  | 'insights.openMindMap'
+  | 'view.architecture'
+  | 'view.architecture.hint'
+  | 'view.modules'
+  | 'view.modules.hint'
+  | 'view.flow'
+  | 'view.flow.hint'
+  | 'view.functions'
+  | 'view.functions.hint'
+  | 'view.git'
+  | 'view.git.hint'
+  | 'git.ui.empty'
+  | 'git.ui.emptyHint'
+  | 'git.ui.run'
+  | 'git.ui.statsCommits'
+  | 'git.ui.statsWindow'
+  | 'git.ui.alive'
+  | 'git.ui.aliveHint'
+  | 'git.ui.frozen'
+  | 'git.ui.frozenHint'
+  | 'git.ui.recent'
+  | 'git.ui.recentHint'
+  | 'git.ui.owners'
+  | 'git.ui.couplings'
+  | 'git.ui.narrative'
+  | 'git.ui.daysAgo'
+  | 'git.ui.commitsCount'
+  | 'git.ui.together'
+  | 'git.ui.openNarrative'
+  | 'git.ui.sample'
+  | 'git.ui.sampleSub'
+  | 'git.ui.hottest'
+  | 'git.ui.coldest'
+  | 'git.ui.coldestSub'
+  | 'git.ui.topCoupling'
+  | 'git.ui.seeAlive'
+  | 'git.ui.seeFrozen'
+  | 'git.ui.seeCommits'
+  | 'git.ui.collapse'
+  | 'git.ui.footerNote'
+  | 'git.ui.none'
+  | 'git.ui.ownersHint'
+  | 'git.ui.couplingsHint'
+  | 'git.ui.llmTitle'
+  | 'git.ui.llmSubtitle'
+  | 'git.ui.llmInspecting'
+  | 'git.ui.llmStructural'
+  | 'git.ui.llmStructuralHint'
+  | 'git.ui.llmWaiting'
+  | 'git.ui.llmNone'
+  | 'header.copy'
+  | 'header.insights'
+  | 'header.llmBusy'
+  | 'nodeMenu.explain'
+  | 'nodeMenu.flowChart'
+  | 'nodeMenu.openFile'
+  | 'nodeMenu.close'
+  | 'mindmap.empty'
+  | 'mindmap.root'
+  | 'mindmap.start'
+  | 'mindmap.flow'
+  | 'mindmap.hubs'
+  | 'mindmap.modules'
+  | 'mindmap.later'
+  | 'mindmap.subtitle'
+  | 'insights.bullet.stats'
+  | 'insights.bullet.mainFlow'
+  | 'insights.bullet.primaryFlow'
+  | 'insights.bullet.entries'
+  | 'insights.bullet.hubs'
+  | 'insights.bullet.orphans'
+  | 'insights.hubReason'
+  | 'insights.hubUtil'
+  | 'insights.orphanReason'
+  | 'webview.buildMissing'
+  | 'webview.buildHint'
+  | 'standalone.noDiagram';
 
 type Catalog = Record<MessageKey, string>;
 
@@ -386,6 +514,7 @@ const id: Catalog = {
   'sidebar.action.explainHint': 'Pilih teks di editor, lalu minta penjelasan LLM.',
   'sidebar.action.saveApiKey': 'Simpan API Key',
   'sidebar.action.openSettings': 'Buka Settings',
+  'sidebar.action.openSettingsHint': 'Bahasa, provider, model, Ollama URL, batas file',
   'sidebar.action.pickProvider': 'Pilih LLM Provider',
   'sidebar.action.pickLanguage': 'Pilih bahasa UI/LLM',
   'sidebar.files.selectAll': 'Centang semua file',
@@ -443,6 +572,8 @@ const id: Catalog = {
     '{label} lokal aktif — {count} API key cloud dihapus dari SecretStorage/settings.',
   'ollama.apiKeyBlocked':
     'Ollama tidak memakai API key cloud. {count} key yang tersimpan sudah dihapus.',
+  'ollama.pickRequired':
+    'Pilih model Ollama yang terpasang (NeverMIN: Pilih Model Ollama), atau ganti ke provider cloud di mode Public.',
   'privacy.gate.title': 'Pilih cara analisis workspace ini',
   'privacy.gate.subtitle': 'Wajib sebelum onboarding',
   'privacy.gate.tooltip':
@@ -459,7 +590,15 @@ const id: Catalog = {
   'privacy.public.badge': 'LLM cloud diizinkan',
   'privacy.public.detail':
     'Tool graph lokal sama, plus Gemini/OpenAI/… opsional jika ada API key.',
-  'privacy.public.applied': 'Mode Public aktif — provider LLM cloud diizinkan.',
+  'privacy.public.applied':
+    'Mode Public aktif — pilih provider cloud lalu simpan API key (Ollama tidak dihapus otomatis).',
+  'privacy.public.pickCloudTitle': 'Pilih provider LLM cloud',
+  'privacy.public.pickCloudPlaceholder': 'Gemini, OpenAI, Anthropic, … (bukan Ollama)',
+  'privacy.public.pickCloud': 'Pilih provider cloud & simpan API key',
+  'privacy.public.pickCloudHint': 'Provider masih Ollama',
+  'privacy.public.stillOllama': 'Masih Ollama — ganti untuk API key',
+  'privacy.public.needCloudFirst':
+    'Mode Public masih memakai Ollama. Pilih provider cloud dulu baru bisa menyimpan API key.',
   'privacy.mode.private': 'Mode: Private codebase',
   'privacy.mode.public': 'Mode: Public codebase',
   'privacy.mode.unset': 'Mode: belum dipilih',
@@ -471,6 +610,15 @@ const id: Catalog = {
   'privacy.providerLocked': 'Terkunci ke Ollama',
   'privacy.cloudBlocked':
     'Mode Private memblokir LLM cloud. Ganti ke Public di Pengaturan jika perlu.',
+  'privacy.cloudBlockedAsk':
+    'Mode Private hanya mengizinkan Ollama. Ganti ke Public supaya provider/API key cloud bisa dipakai?',
+  'privacy.switchToPublic': 'Ganti ke Public',
+  'privacy.keepPrivateOllama': 'Tetap Private (Ollama)',
+  'privacy.providerKept': 'Mode Public aktif — provider tetap {provider}.',
+  'privacy.switchToOllama': 'Pakai Ollama',
+  'privacy.switchToOllamaAsk':
+    'Ini akan mengganti provider cloud ke Ollama lokal dan menghapus API key cloud yang tersimpan. Lanjut?',
+  'privacy.keepCloudProvider': 'Tetap pakai provider cloud',
   'wipe.sidebar': 'Hapus data workspace ini',
   'wipe.sidebarHint': 'Analisis + Git + cache',
   'wipe.sidebarPrivateHint': 'Penting untuk Private',
@@ -530,6 +678,17 @@ const id: Catalog = {
   'explain.question': 'Jelaskan kode yang diseleksi dengan singkat.',
   'explain.done': 'Penjelasan siap.',
   'explain.failed': 'Gagal menjelaskan kode: {error}',
+  'explain.modal.badge': 'Penjelasan AI',
+  'explain.modal.loading': 'LLM sedang menjelaskan komponen ini…',
+  'explain.modal.loadingScope': 'Menyiapkan konteks {scope}…',
+  'explain.modal.error': 'Gagal menjelaskan komponen ini.',
+  'explain.modal.cancelled': 'Penjelasan dibatalkan.',
+  'explain.modal.empty': 'Tidak ada penjelasan.',
+  'explain.modal.close': 'Tutup penjelasan',
+  'explain.modal.thinking': 'Thinking model (klik untuk buka)',
+  'explain.scope.file': 'file utuh',
+  'explain.scope.module': 'folder module',
+  'explain.scope.function': 'fungsi',
   'analyze.fileCap':
     'NeverMIN membatasi analisis ke {max} file pertama (dari {total}). Centang subset lebih kecil untuk fokus.',
   'analyze.cancelled': 'Analisis NeverMIN dibatalkan.',
@@ -557,54 +716,12 @@ const id: Catalog = {
   'structure.openSymbolGraph': 'Buka graph fungsi',
   'structure.focusFile': 'Fungsi di {file}',
   'structure.focusSymbol': 'Fokus: {name}',
-  'webview.modules': 'Modul',
-  'webview.flow': 'Flow',
-  'webview.functions': 'Fungsi',
-  'webview.insights': 'Insights',
-  'webview.copyMermaid': 'Salin Mermaid',
   'webview.openSource': 'Buka sumber',
-  'webview.theme': 'Tema',
-  'webview.themeLight': 'Terang',
-  'webview.themeDark': 'Gelap',
-  'webview.fullFlow': 'Flow penuh',
   'webview.mindMap': 'Mind Map',
-  'webview.openMindMap': 'Buka mind map',
-  'webview.mindMapHint':
-    'Pecahan belajar: mulai dari entry → ikuti alur utama → pahami hub → jelajahi modul.',
-  'webview.closeInsights': 'Tutup Insights',
-  'webview.zoomHint': 'Scroll = zoom · drag = geser · klik node = buka file',
-  'webview.loadingTitle': 'Menyiapkan diagram',
-  'webview.loadingBody': 'Menyusun arsitektur Mermaid…',
-  'webview.emptyTitle': 'Belum ada diagram',
-  'webview.emptyBody': 'Jalankan analisis repo untuk membangun arsitektur.',
-  'webview.errorTitle': 'Diagram gagal dimuat',
-  'webview.errorBody': 'Ada masalah saat merender Mermaid.',
-  'webview.insightsTitle': 'Insights',
-  'webview.purposeHeading': 'Kodingan ini untuk apa',
-  'webview.summaryHeading': 'Ringkasan',
   'webview.mainFlowHeading': 'Alur Utama',
-  'webview.mainFlowEmpty': 'Belum ada alur',
-  'webview.mainFlowEmptyHint': 'Jalankan analisis untuk melihat input, proses, dan output.',
-  'webview.mainFlowWeak': 'Analisis belum menemukan input, proses, dan output yang kuat.',
-  'webview.openFullFlow': 'Buka flow penuh',
-  'webview.entryHeading': 'Entry',
-  'webview.hubHeading': 'Hub',
-  'webview.statsHeading': 'Stats',
-  'webview.statFiles': 'File ditampilkan',
-  'webview.statEdges': 'Relasi',
-  'webview.statTotal': 'File total',
-  'webview.statNodes': 'Symbol graph',
-  'webview.noInsightsPurpose': 'Jalankan analisis + API key untuk penjelasan aplikasi.',
-  'webview.noInsightsSummary': 'Jalankan analisis untuk ringkasan.',
-  'webview.rendering': 'Merender…',
-  'webview.noMermaid': 'Belum ada konten Mermaid.',
   'webview.mermaidMissing': 'Library Mermaid tidak tersedia di webview. Cek CSP / path mermaid.min.js.',
-  'webview.mermaidFail': 'Mermaid gagal dirender: {detail}',
   'webview.copied': 'Sumber Mermaid disalin ke clipboard.',
   'webview.noDiagramYet': 'Belum ada diagram untuk dibuka.',
-  'webview.truncateNote': 'Ditampilkan {shown} dari {total} file (prioritas entry/hub/relasi).',
-  'webview.purposeFallback':
-    'Aplikasi ini adalah aplikasi untuk (belum terdeteksi — jalankan ulang analisis dengan API key).',
   'llm.empty': 'hasil kosong',
   'llm.call': 'LLM panggil · {task} · {provider}{model}',
   'llm.ok': 'LLM sukses · {task} · {ms}ms · {summary}',
@@ -625,8 +742,154 @@ const id: Catalog = {
   'llm.notice.failed':
     'LLM {label} gagal dipanggil. Diagram tetap tampil. Detail: {detail}',
   'llm.notice.failedHint': 'lihat Output NeverMIN untuk detail',
-  'flow.mermaidMissing': 'Sumber Mermaid kosong.',
-  'flow.renderFail': 'Mermaid gagal dirender.'
+  'flow.renderFail': 'Mermaid gagal dirender.',
+  'lang.active': 'Aktif',
+  'graph.card.entry': 'Titik masuk arsitektur untuk {name}.',
+  'graph.card.hub': 'Hub pusat yang menghubungkan alur {name}.',
+  'graph.card.output': 'Keluar hasil / tampilan dari alur {name}.',
+  'graph.card.step': 'Bagian alur yang menangani {name}.',
+  'graph.card.file': 'Modul berkas {name} dalam code graph.',
+  'graph.card.component': 'Komponen {name} dalam code graph.',
+  'graph.arch.empty': 'Belum ada insights arsitektur. Jalankan analisis repo.',
+  'graph.arch.section.entry': '1 · Entry Points',
+  'graph.arch.section.entryHint': 'Titik masuk — mulai baca dari sini',
+  'graph.arch.section.hub': '2 · Core Hubs',
+  'graph.arch.section.hubHint': 'Komponen pusat yang paling banyak dihubungkan',
+  'graph.arch.section.pipeline': '3 · Main Pipeline',
+  'graph.arch.section.pipelineHint': 'Alur utama Input → Process → Output',
+  'graph.arch.section.support': '4 · Supporting Modules',
+  'graph.flow.empty': 'Main flow belum terdeteksi. Jalankan analisis repo.',
+  'graph.flow.section.start': '1 · Start',
+  'graph.flow.section.startHint': 'Mulai baca dari sini — titik masuk alur',
+  'graph.flow.section.step': '{n} · Langkah berikutnya',
+  'graph.flow.section.stepHint': 'Dipanggil dari langkah sebelumnya',
+  'graph.flow.section.end': 'End · Hasil / leaf',
+  'graph.flow.section.endHint': 'Ujung alur — jarang memanggil fungsi lain di file ini',
+  'graph.flow.section.other': 'Lainnya',
+  'graph.flow.section.otherHint': 'Tidak terhubung ke alur calls utama',
+  'graph.flow.card.start': 'Mulai dari sini — {name} memulai alur di file ini.',
+  'graph.flow.card.step': '{name} adalah langkah di tengah alur pemanggilan.',
+  'graph.flow.card.end': '{name} cenderung ujung alur (leaf) di file ini.',
+  'graph.modules.empty': 'Belum ada modul untuk ditampilkan.',
+  'graph.modules.summary': '{count} file · skor relasi {score}',
+  'graph.functions.empty': 'Tidak ada fungsi terdeteksi di graph.',
+  'graph.functions.openHint': '{count} symbol · klik untuk membuka',
+  'graph.functions.noneInFile': 'Tidak ada fungsi di {file}.',
+  'graph.functions.pickFile': 'Pilih file untuk melihat fungsi.',
+  'graph.flow.mermaidEmpty': 'Belum ada flow',
+  'graph.view.empty': 'Belum ada data untuk view ini.',
+  'graph.loading': 'Memuat graph…',
+  'graph.error': 'Gagal memuat graph.',
+  'graph.none': 'Belum ada graph. Jalankan Analyze Repo.',
+  'graph.backAllFiles': 'Semua file',
+  'graph.backNodeFlow': 'Kembali',
+  'graph.panelMissing': 'Buka panel Code Graph dulu, lalu coba Flow Chart lagi.',
+  'graph.reactMissing': 'Graph belum punya view React. Compile ulang extension.',
+  'insights.waitingLlm': 'Menunggu ringkasan LLM…',
+  'insights.none': 'Belum ada insights.',
+  'insights.title': 'Insights',
+  'insights.subtitle': 'Pahami tujuan, struktur, dan alur data codebase ini.',
+  'insights.inspecting': 'LLM sedang memeriksa codebase…',
+  'insights.openFlow': 'Buka flow',
+  'insights.purpose': 'Untuk apa codebase ini',
+  'insights.overview': 'Overview',
+  'insights.mainFlow': 'Alur data utama',
+  'insights.howToRead': 'Cara membaca codebase ini',
+  'insights.startHere': 'Mulai di sini',
+  'insights.followModules': 'Ikuti modul',
+  'insights.trackExecution': 'Lacak eksekusi',
+  'insights.totalComponents': 'Total komponen:',
+  'insights.tokenUsage': 'Token:',
+  'insights.tokenUsageSplit': '{prompt} masuk · {completion} keluar',
+  'insights.llmUnavailable': 'Mode struktural',
+  'insights.llmFailed': 'Mode struktural',
+  'insights.fallbackSkipped': 'LLM belum aktif — insights disusun dari code graph.',
+  'insights.fallbackError': 'LLM gagal — insights disusun dari code graph.',
+  'insights.structuralMode': 'Insights dari code graph',
+  'insights.structuralHint':
+    'Tanpa LLM, NeverMIN tetap menampilkan entry, hub, dan alur utama dari struktur repo.',
+  'insights.structuralOverview': 'Ringkasan struktural',
+  'insights.hubs': 'Core hubs',
+  'insights.openMindMap': 'Buka Mind Map',
+  'view.architecture': 'Architecture',
+  'view.architecture.hint': 'Peta sistem tingkat tinggi — entry point, hub, dan koneksi komponen utama.',
+  'view.modules': 'Modules',
+  'view.modules.hint': 'Tampilan folder/paket — modul mana yang saling bergantung.',
+  'view.flow': 'Flow',
+  'view.flow.hint': 'Jalur data utama — Input → Process → Output di codebase.',
+  'view.functions': 'Functions',
+  'view.functions.hint': 'Semua file berisi symbol — kartu tertutup sampai dibuka.',
+  'view.git': 'Git Insights',
+  'view.git.hint': 'Churn, file hidup/beku, pemilik, dan coupling dari riwayat git.',
+  'git.ui.empty': 'Belum ada Git Insights',
+  'git.ui.emptyHint': 'Jalankan Analyze Git History dari sidebar NeverMIN.',
+  'git.ui.run': 'Analisis Git History',
+  'git.ui.statsCommits': '{count} commit',
+  'git.ui.statsWindow': '{days} hari',
+  'git.ui.alive': 'File Hidup',
+  'git.ui.aliveHint': 'File dengan perubahan paling sering',
+  'git.ui.frozen': 'File Beku',
+  'git.ui.frozenHint': 'File yang tidak berubah dalam waktu lama',
+  'git.ui.recent': 'Commit Terbaru',
+  'git.ui.recentHint': 'Commit terbaru dari repository',
+  'git.ui.owners': 'Pemilik file',
+  'git.ui.couplings': 'Coupling',
+  'git.ui.narrative': 'Narasi',
+  'git.ui.daysAgo': '{days}h lalu',
+  'git.ui.commitsCount': '{count} commit',
+  'git.ui.together': '{count}x bareng',
+  'git.ui.openNarrative': 'Buka narasi',
+  'git.ui.sample': 'Sampel',
+  'git.ui.sampleSub': 'dalam {days} hari terakhir',
+  'git.ui.hottest': 'Paling hidup',
+  'git.ui.coldest': 'Paling beku',
+  'git.ui.coldestSub': '{days} hari sejak ubah terakhir',
+  'git.ui.topCoupling': 'Coupling tertinggi',
+  'git.ui.seeAlive': 'Lihat semua file hidup',
+  'git.ui.seeFrozen': 'Lihat semua file beku',
+  'git.ui.seeCommits': 'Lihat semua commit',
+  'git.ui.collapse': 'Ciutkan',
+  'git.ui.footerNote': 'Data berdasarkan riwayat git dalam {days} hari terakhir.',
+  'git.ui.none': 'tidak ada',
+  'git.ui.ownersHint': 'Author yang paling sering menyentuh file penting',
+  'git.ui.couplingsHint': 'Pasangan file yang sering berubah bersama',
+  'git.ui.llmTitle': 'LLM Insights',
+  'git.ui.llmSubtitle': 'Narasi dari riwayat git — kenapa, siapa, dan coupling tersembunyi.',
+  'git.ui.llmInspecting': 'LLM sedang menulis Git Insights…',
+  'git.ui.llmStructural': 'Ringkasan struktural dari git history',
+  'git.ui.llmStructuralHint':
+    'Narasi LLM belum tersedia. Menampilkan ringkasan heuristik dari commit sample.',
+  'git.ui.llmWaiting': 'Menunggu narasi LLM…',
+  'git.ui.llmNone': 'Belum ada ringkasan untuk ditampilkan.',
+  'header.copy': 'Salin',
+  'header.insights': 'Insights',
+  'header.llmBusy': 'LLM…',
+  'nodeMenu.explain': 'Explain With LLM',
+  'nodeMenu.flowChart': 'Flow Chart',
+  'nodeMenu.openFile': 'Buka file',
+  'nodeMenu.close': 'Tutup menu',
+  'mindmap.empty': 'Belum ada data mind map. Jalankan Analyze Repo dulu.',
+  'mindmap.root': 'Pecahan belajar',
+  'mindmap.start': 'Mulai di sini',
+  'mindmap.flow': 'Alur utama',
+  'mindmap.hubs': 'Konsep inti (hub)',
+  'mindmap.modules': 'Modul untuk dijelajahi',
+  'mindmap.later': 'Cek belakangan',
+  'mindmap.subtitle': '{entries} entry · {hubs} hub · pelajari berurutan',
+  'insights.bullet.stats':
+    'Graph punya {nodes} node dan {edges} edge ({imports} imports, {calls} calls, {uses} uses).',
+  'insights.bullet.mainFlow': 'Flow utama data: Input: {input} → Output: {output}',
+  'insights.bullet.primaryFlow': 'Alur utama: {label}.',
+  'insights.bullet.entries': 'Titik masuk yang menonjol: {names}.',
+  'insights.bullet.hubs': 'Hub yang sering dipakai: {names}.',
+  'insights.bullet.orphans':
+    '{count} file terlihat terisolasi (tanpa relasi antar-file), mis. {example}.',
+  'insights.hubReason': 'PR {pr}%, diver modul {div}%{util}',
+  'insights.hubUtil': ', util↓',
+  'insights.orphanReason': 'Tidak punya relasi imports/calls/uses ke file lain',
+  'webview.buildMissing': 'NeverMIN webview belum di-build',
+  'webview.buildHint': 'Jalankan npm run build:webview lalu reload window.',
+  'standalone.noDiagram': 'Belum ada diagram untuk dibuka di browser.'
 };
 
 const en: Catalog = {
@@ -714,6 +977,7 @@ const en: Catalog = {
   'sidebar.action.explainHint': 'Select text in the editor, then ask the LLM to explain it.',
   'sidebar.action.saveApiKey': 'Save API Key',
   'sidebar.action.openSettings': 'Open Settings',
+  'sidebar.action.openSettingsHint': 'Language, provider, model, Ollama URL, file cap',
   'sidebar.action.pickProvider': 'Choose LLM Provider',
   'sidebar.action.pickLanguage': 'Choose UI/LLM language',
   'sidebar.files.selectAll': 'Check all files',
@@ -771,6 +1035,8 @@ const en: Catalog = {
     '{label} is local — cleared {count} cloud API key(s) from SecretStorage/settings.',
   'ollama.apiKeyBlocked':
     'Ollama does not use cloud API keys. Cleared {count} stored key(s).',
+  'ollama.pickRequired':
+    'Pick an installed Ollama model (NeverMIN: Choose Ollama Model), or switch to a cloud provider in Public mode.',
   'privacy.gate.title': 'Choose how you analyze this workspace',
   'privacy.gate.subtitle': 'Required before onboarding',
   'privacy.gate.tooltip':
@@ -787,7 +1053,15 @@ const en: Catalog = {
   'privacy.public.badge': 'Cloud LLM allowed',
   'privacy.public.detail':
     'Same local graph tools, plus optional Gemini/OpenAI/… when you save an API key.',
-  'privacy.public.applied': 'Public mode on — cloud LLM providers are allowed.',
+  'privacy.public.applied':
+    'Public mode on — pick a cloud provider, then save an API key (Ollama is not cleared automatically).',
+  'privacy.public.pickCloudTitle': 'Choose a cloud LLM provider',
+  'privacy.public.pickCloudPlaceholder': 'Gemini, OpenAI, Anthropic, … (not Ollama)',
+  'privacy.public.pickCloud': 'Pick cloud provider & save API key',
+  'privacy.public.pickCloudHint': 'Provider is still Ollama',
+  'privacy.public.stillOllama': 'Still Ollama — switch to use an API key',
+  'privacy.public.needCloudFirst':
+    'Public mode is still on Ollama. Pick a cloud provider before saving an API key.',
   'privacy.mode.private': 'Mode: Private codebase',
   'privacy.mode.public': 'Mode: Public codebase',
   'privacy.mode.unset': 'Mode: not chosen yet',
@@ -799,6 +1073,15 @@ const en: Catalog = {
   'privacy.providerLocked': 'Locked to Ollama',
   'privacy.cloudBlocked':
     'Private codebase mode blocks cloud LLM. Switch to Public in Settings if you need it.',
+  'privacy.cloudBlockedAsk':
+    'Private mode only allows Ollama. Switch to Public so you can use a cloud provider / API key?',
+  'privacy.switchToPublic': 'Switch to Public',
+  'privacy.keepPrivateOllama': 'Keep Private (Ollama)',
+  'privacy.providerKept': 'Public mode on — provider kept as {provider}.',
+  'privacy.switchToOllama': 'Use Ollama',
+  'privacy.switchToOllamaAsk':
+    'This switches from your cloud provider to local Ollama and clears stored cloud API keys. Continue?',
+  'privacy.keepCloudProvider': 'Keep cloud provider',
   'wipe.sidebar': 'Wipe this workspace data',
   'wipe.sidebarHint': 'Analysis + Git + cache',
   'wipe.sidebarPrivateHint': 'Important for Private',
@@ -858,6 +1141,17 @@ const en: Catalog = {
   'explain.question': 'Explain the selected code briefly.',
   'explain.done': 'Explanation ready.',
   'explain.failed': 'Failed to explain code: {error}',
+  'explain.modal.badge': 'AI Explanation',
+  'explain.modal.loading': 'LLM is explaining this component…',
+  'explain.modal.loadingScope': 'Preparing {scope} context…',
+  'explain.modal.error': 'Failed to explain this component.',
+  'explain.modal.cancelled': 'Explanation cancelled.',
+  'explain.modal.empty': 'No explanation available.',
+  'explain.modal.close': 'Close explanation',
+  'explain.modal.thinking': 'Model thinking (click to expand)',
+  'explain.scope.file': 'whole file',
+  'explain.scope.module': 'module folder',
+  'explain.scope.function': 'function',
   'analyze.fileCap':
     'NeverMIN limited analysis to the first {max} files (of {total}). Check a smaller subset to focus.',
   'analyze.cancelled': 'NeverMIN analysis cancelled.',
@@ -885,54 +1179,12 @@ const en: Catalog = {
   'structure.openSymbolGraph': 'Open function graph',
   'structure.focusFile': 'Functions in {file}',
   'structure.focusSymbol': 'Focus: {name}',
-  'webview.modules': 'Modules',
-  'webview.flow': 'Flow',
-  'webview.functions': 'Functions',
-  'webview.insights': 'Insights',
-  'webview.copyMermaid': 'Copy Mermaid',
   'webview.openSource': 'Open source',
-  'webview.theme': 'Theme',
-  'webview.themeLight': 'Light',
-  'webview.themeDark': 'Dark',
-  'webview.fullFlow': 'Full flow',
   'webview.mindMap': 'Mind Map',
-  'webview.openMindMap': 'Open mind map',
-  'webview.mindMapHint':
-    'Learning breakdown: start at entries → follow the main flow → learn hubs → explore modules.',
-  'webview.closeInsights': 'Close Insights',
-  'webview.zoomHint': 'Scroll = zoom · drag = pan · click node = open file',
-  'webview.loadingTitle': 'Preparing diagram',
-  'webview.loadingBody': 'Building Mermaid architecture…',
-  'webview.emptyTitle': 'No diagram yet',
-  'webview.emptyBody': 'Run a repo analysis to build the architecture.',
-  'webview.errorTitle': 'Diagram failed to load',
-  'webview.errorBody': 'Something went wrong while rendering Mermaid.',
-  'webview.insightsTitle': 'Insights',
-  'webview.purposeHeading': 'What this codebase is for',
-  'webview.summaryHeading': 'Summary',
   'webview.mainFlowHeading': 'Main Flow',
-  'webview.mainFlowEmpty': 'No flow yet',
-  'webview.mainFlowEmptyHint': 'Run analysis to see input, process, and output.',
-  'webview.mainFlowWeak': 'Analysis did not find a strong input → process → output path.',
-  'webview.openFullFlow': 'Open full flow',
-  'webview.entryHeading': 'Entry',
-  'webview.hubHeading': 'Hub',
-  'webview.statsHeading': 'Stats',
-  'webview.statFiles': 'Files shown',
-  'webview.statEdges': 'Relations',
-  'webview.statTotal': 'Total files',
-  'webview.statNodes': 'Graph symbols',
-  'webview.noInsightsPurpose': 'Run analysis with an API key for an app explanation.',
-  'webview.noInsightsSummary': 'Run analysis for a summary.',
-  'webview.rendering': 'Rendering…',
-  'webview.noMermaid': 'No Mermaid content yet.',
   'webview.mermaidMissing': 'Mermaid library is unavailable in the webview. Check CSP / mermaid.min.js path.',
-  'webview.mermaidFail': 'Mermaid failed to render: {detail}',
   'webview.copied': 'Mermaid source copied to clipboard.',
   'webview.noDiagramYet': 'No diagram to open yet.',
-  'webview.truncateNote': 'Showing {shown} of {total} files (entry/hub/relation priority).',
-  'webview.purposeFallback':
-    'This application is for (not detected yet — rerun analysis with an API key).',
   'llm.empty': 'empty result',
   'llm.call': 'LLM call · {task} · {provider}{model}',
   'llm.ok': 'LLM ok · {task} · {ms}ms · {summary}',
@@ -953,8 +1205,155 @@ const en: Catalog = {
   'llm.notice.failed':
     'LLM {label} failed. The diagram is still shown. Detail: {detail}',
   'llm.notice.failedHint': 'see NeverMIN Output for details',
-  'flow.mermaidMissing': 'Mermaid source is empty.',
-  'flow.renderFail': 'Mermaid failed to render.'
+  'flow.renderFail': 'Mermaid failed to render.',
+  'lang.active': 'Active',
+  'graph.card.entry': 'Architecture entry point for {name}.',
+  'graph.card.hub': 'Central hub connecting the {name} flow.',
+  'graph.card.output': 'Output / presentation stage for {name}.',
+  'graph.card.step': 'Pipeline step handling {name}.',
+  'graph.card.file': 'File module {name} in the code graph.',
+  'graph.card.component': 'Component {name} in the code graph.',
+  'graph.arch.empty': 'No architecture insights yet. Run repo analysis.',
+  'graph.arch.section.entry': '1 · Entry Points',
+  'graph.arch.section.entryHint': 'Entry points — start reading here',
+  'graph.arch.section.hub': '2 · Core Hubs',
+  'graph.arch.section.hubHint': 'Central components with the most connections',
+  'graph.arch.section.pipeline': '3 · Main Pipeline',
+  'graph.arch.section.pipelineHint': 'Main path Input → Process → Output',
+  'graph.arch.section.support': '4 · Supporting Modules',
+  'graph.flow.empty': 'Main flow not detected yet. Run repo analysis.',
+  'graph.flow.section.start': '1 · Start',
+  'graph.flow.section.startHint': 'Start reading here — entry of this call flow',
+  'graph.flow.section.step': '{n} · Next steps',
+  'graph.flow.section.stepHint': 'Called from the previous step',
+  'graph.flow.section.end': 'End · Results / leaves',
+  'graph.flow.section.endHint': 'End of the flow — rarely calls other locals',
+  'graph.flow.section.other': 'Other',
+  'graph.flow.section.otherHint': 'Not connected to the main call flow',
+  'graph.flow.card.start': 'Start here — {name} begins the flow in this file.',
+  'graph.flow.card.step': '{name} is a mid-flow call step.',
+  'graph.flow.card.end': '{name} tends to be a leaf / end of this file flow.',
+  'graph.modules.empty': 'No modules to display yet.',
+  'graph.modules.summary': '{count} files · relation score {score}',
+  'graph.functions.empty': 'No functions detected in the graph.',
+  'graph.functions.openHint': '{count} symbols · click to open',
+  'graph.functions.noneInFile': 'No functions in {file}.',
+  'graph.functions.pickFile': 'Pick a file to view its functions.',
+  'graph.flow.mermaidEmpty': 'No flow yet',
+  'graph.view.empty': 'No data for this view yet.',
+  'graph.loading': 'Loading graph…',
+  'graph.error': 'Failed to load graph.',
+  'graph.none': 'No graph yet. Run Analyze Repo.',
+  'graph.backAllFiles': 'All files',
+  'graph.backNodeFlow': 'Back',
+  'graph.panelMissing': 'Open the Code Graph panel first, then try Flow Chart again.',
+  'graph.reactMissing': 'Graph has no React views yet. Recompile the extension.',
+  'insights.waitingLlm': 'Waiting for LLM summary…',
+  'insights.none': 'No insights yet.',
+  'insights.title': 'Insights',
+  'insights.subtitle': 'Understand the purpose, structure, and data flow of this codebase.',
+  'insights.inspecting': 'LLM is inspecting this codebase…',
+  'insights.openFlow': 'Open flow',
+  'insights.purpose': 'What this codebase is for',
+  'insights.overview': 'Overview',
+  'insights.mainFlow': 'Main data flow',
+  'insights.howToRead': 'How to read this codebase',
+  'insights.startHere': 'Start here',
+  'insights.followModules': 'Follow modules',
+  'insights.trackExecution': 'Track execution',
+  'insights.totalComponents': 'Total components:',
+  'insights.tokenUsage': 'Tokens:',
+  'insights.tokenUsageSplit': '{prompt} in · {completion} out',
+  'insights.llmUnavailable': 'Structural mode',
+  'insights.llmFailed': 'Structural mode',
+  'insights.fallbackSkipped': 'LLM is off — insights are built from the code graph.',
+  'insights.fallbackError': 'LLM failed — insights are built from the code graph.',
+  'insights.structuralMode': 'Insights from the code graph',
+  'insights.structuralHint':
+    'Without the LLM, NeverMIN still shows entries, hubs, and the main flow from repo structure.',
+  'insights.structuralOverview': 'Structural overview',
+  'insights.hubs': 'Core hubs',
+  'insights.openMindMap': 'Open Mind Map',
+  'view.architecture': 'Architecture',
+  'view.architecture.hint':
+    'High-level system map — entry points, hubs, and how major components connect.',
+  'view.modules': 'Modules',
+  'view.modules.hint': 'Folder / package view — which modules depend on each other.',
+  'view.flow': 'Flow',
+  'view.flow.hint': 'Main data path — Input → Process → Output through the codebase.',
+  'view.functions': 'Functions',
+  'view.functions.hint': 'All files with symbols — cards stay closed until you open one.',
+  'view.git': 'Git Insights',
+  'view.git.hint': 'Churn, alive/frozen files, owners, and couplings from git history.',
+  'git.ui.empty': 'No Git Insights yet',
+  'git.ui.emptyHint': 'Run Analyze Git History from the NeverMIN sidebar.',
+  'git.ui.run': 'Analyze Git History',
+  'git.ui.statsCommits': '{count} commits',
+  'git.ui.statsWindow': '{days} days',
+  'git.ui.alive': 'Hot files',
+  'git.ui.aliveHint': 'Files that change most often',
+  'git.ui.frozen': 'Frozen files',
+  'git.ui.frozenHint': 'Files that have not changed for a long time',
+  'git.ui.recent': 'Latest commits',
+  'git.ui.recentHint': 'Most recent commits in the repository',
+  'git.ui.owners': 'File owners',
+  'git.ui.couplings': 'Couplings',
+  'git.ui.narrative': 'Narrative',
+  'git.ui.daysAgo': '{days}d ago',
+  'git.ui.commitsCount': '{count} commits',
+  'git.ui.together': '{count}x together',
+  'git.ui.openNarrative': 'Open narrative',
+  'git.ui.sample': 'Sample',
+  'git.ui.sampleSub': 'in the last {days} days',
+  'git.ui.hottest': 'Hottest',
+  'git.ui.coldest': 'Most frozen',
+  'git.ui.coldestSub': '{days} days since last change',
+  'git.ui.topCoupling': 'Highest coupling',
+  'git.ui.seeAlive': 'See all hot files',
+  'git.ui.seeFrozen': 'See all frozen files',
+  'git.ui.seeCommits': 'See all commits',
+  'git.ui.collapse': 'Collapse',
+  'git.ui.footerNote': 'Data is based on git history from the last {days} days.',
+  'git.ui.none': 'none',
+  'git.ui.ownersHint': 'Authors who most often touch key files',
+  'git.ui.couplingsHint': 'File pairs that frequently change together',
+  'git.ui.llmTitle': 'LLM Insights',
+  'git.ui.llmSubtitle': 'Narrative from git history — why, who, and hidden coupling.',
+  'git.ui.llmInspecting': 'LLM is writing Git Insights…',
+  'git.ui.llmStructural': 'Structural summary from git history',
+  'git.ui.llmStructuralHint':
+    'LLM narrative is unavailable. Showing a heuristic summary from the commit sample.',
+  'git.ui.llmWaiting': 'Waiting for LLM narrative…',
+  'git.ui.llmNone': 'No summary to show yet.',
+  'header.copy': 'Copy',
+  'header.insights': 'Insights',
+  'header.llmBusy': 'LLM…',
+  'nodeMenu.explain': 'Explain With LLM',
+  'nodeMenu.flowChart': 'Flow Chart',
+  'nodeMenu.openFile': 'Open file',
+  'nodeMenu.close': 'Close menu',
+  'mindmap.empty': 'No mind map data yet. Run Analyze Repo first.',
+  'mindmap.root': 'Learning breakdown',
+  'mindmap.start': 'Start here',
+  'mindmap.flow': 'Main flow',
+  'mindmap.hubs': 'Core hubs',
+  'mindmap.modules': 'Modules to explore',
+  'mindmap.later': 'Check later',
+  'mindmap.subtitle': '{entries} entries · {hubs} hubs · learn in this order',
+  'insights.bullet.stats':
+    'Graph has {nodes} nodes and {edges} edges ({imports} imports, {calls} calls, {uses} uses).',
+  'insights.bullet.mainFlow': 'Main data flow: Input: {input} → Output: {output}',
+  'insights.bullet.primaryFlow': 'Primary flow: {label}.',
+  'insights.bullet.entries': 'Notable entry points: {names}.',
+  'insights.bullet.hubs': 'Frequently used hubs: {names}.',
+  'insights.bullet.orphans':
+    '{count} files look isolated (no cross-file relations), e.g. {example}.',
+  'insights.hubReason': 'PR {pr}%, module-div {div}%{util}',
+  'insights.hubUtil': ', util↓',
+  'insights.orphanReason': 'No imports/calls/uses relations to other files',
+  'webview.buildMissing': 'NeverMIN webview is not built yet',
+  'webview.buildHint': 'Run npm run build:webview then reload the window.',
+  'standalone.noDiagram': 'No diagram to open in the browser yet.'
 };
 
 export const messages: Record<'id' | 'en', Catalog> = { id, en };

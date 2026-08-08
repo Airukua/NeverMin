@@ -1,5 +1,7 @@
 import { Logger } from './logger';
 import { t } from '../i18n';
+import type { LlmCompletionResult } from '../types';
+import { formatTokenUsageForLog } from '../core/llm/tokenUsage';
 
 export interface LlmCallMeta {
   /** Nama tugas singkat untuk sidebar, mis. "narasi insights" */
@@ -44,6 +46,23 @@ export async function runLoggedLlmCall<T>(
     Logger.error(t('llm.fail', { task: meta.task, ms: String(ms), error: formatError(error) }));
     throw error;
   }
+}
+
+/** Wrap text summarizer supaya log ikut menampilkan token usage bila ada. */
+export function withCompletionUsageSummary(
+  summarizeText: (text: string) => string
+): (result: LlmCompletionResult) => string {
+  return (result) => {
+    const base = summarizeText(result.text);
+    const usage = formatTokenUsageForLog(result.usage);
+    const cacheTag = result.fromCache ? ' · cache' : '';
+    const thinking = result.thinking?.trim();
+    if (thinking) {
+      Logger.info(`LLM thinking · ${thinking.length} karakter · ${clip(thinking, 160)}`);
+    }
+    const thinkTag = thinking ? ` · thinking=${thinking.length}c` : '';
+    return usage ? `${base} · ${usage}${thinkTag}${cacheTag}` : `${base}${thinkTag}${cacheTag}`;
+  };
 }
 
 /** Cuplikan narasi untuk log (ambil heading tujuan bila ada). */

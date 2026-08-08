@@ -1,25 +1,102 @@
 import * as assert from 'assert';
-import { escapeHtml, renderMarkdownLite } from '../../src/ui/webview/markdownLite';
+import {
+  escapeHtml,
+  normalizeMarkdownSource,
+  renderMarkdownLite
+} from '../../src/ui/webview/markdownLite';
 
 describe('renderMarkdownLite', () => {
   it('merender heading, bold, dan bullet list', () => {
-    const html = renderMarkdownLite([
-      '## Overview',
-      '',
-      'Codebase berpusat pada **MapResponden**.',
-      '',
-      '## Cara baca codebase ini',
-      '',
-      '- Mulai dari `MapResponden`',
-      '- Kenali komponen **Card**'
-    ].join('\n'));
+    const html = renderMarkdownLite(
+      [
+        '## Overview',
+        '',
+        'Codebase berpusat pada **MapResponden**.',
+        '',
+        '## Cara baca codebase ini',
+        '',
+        '- Mulai dari `MapResponden`',
+        '- Kenali komponen **Card**'
+      ].join('\n')
+    );
 
-    assert.ok(html.includes('<h4>Overview</h4>'));
+    assert.ok(html.includes('<h3>Overview</h3>'));
     assert.ok(html.includes('<strong>MapResponden</strong>'));
     assert.ok(html.includes('<ul>'));
     assert.ok(html.includes('<li>'));
     assert.ok(html.includes('<code>MapResponden</code>'));
     assert.ok(!html.includes('**MapResponden**'));
+  });
+
+  it('memisahkan heading LLM yang nempel ke body', () => {
+    const raw = [
+      'Purpose',
+      '## What this codebase is for This application is for training.',
+      '## Overview This is a moderately sized codebase.',
+      '## How to read this codebase - Begin by exploring **MainConfig** - Then check trainer'
+    ].join('\n');
+
+    const normalized = normalizeMarkdownSource(raw);
+    assert.ok(/## What this codebase is for\n\nThis application/.test(normalized));
+    assert.ok(/## Overview\n\nThis is a moderately/.test(normalized));
+    assert.ok(normalized.includes('## How to read this codebase'));
+    assert.ok(normalized.includes('- Begin by exploring'));
+
+    const html = renderMarkdownLite(raw);
+    assert.ok(html.includes('<h3>What this codebase is for</h3>'));
+    assert.ok(html.includes('<p>This application is for training.</p>'));
+    assert.ok(html.includes('<h3>Overview</h3>'));
+    assert.ok(html.includes('<h3>How to read this codebase</h3>'));
+    assert.ok(html.includes('<li>'));
+    assert.ok(html.includes('<strong>MainConfig</strong>'));
+    assert.ok(html.includes('Begin by exploring'));
+  });
+
+  it('merender numbered section title dan subheading bold', () => {
+    const html = renderMarkdownLite(
+      [
+        '1. Tujuan',
+        '**Utama**',
+        'File File ini menyediakan hooks.',
+        '',
+        '2. Simbol & Komponen',
+        '- CallbackHandler'
+      ].join('\n')
+    );
+
+    assert.ok(html.includes('<h2>1. Tujuan</h2>'));
+    assert.ok(html.includes('<h3>Utama</h3>'));
+    assert.ok(html.includes('<p>File ini menyediakan hooks.</p>'));
+    assert.ok(!html.includes('File File'));
+    assert.ok(html.includes('<h2>2. Simbol &amp; Komponen</h2>'));
+  });
+
+  it('memperbaiki heading nomor yang pecah dari body (contoh Explain LLM)', () => {
+    const raw = [
+      '1.',
+      'Tujuan File ini bertujuan sebagai single source of truth.',
+      '',
+      '2.',
+      'Simbol utama Berikut adalah simbol utama:',
+      '',
+      '1. **Jembatan',
+      'Antar Sub-Sistem**: Menghubungkan komponen terpisah.',
+      '',
+      '4.',
+      'Kapan',
+      '',
+      'Harus Membuka atau Mengubah File Ini Kamu perlu membuka file ini jika:'
+    ].join('\n');
+
+    const html = renderMarkdownLite(raw);
+    assert.ok(html.includes('<h2>1. Tujuan</h2>'), html);
+    assert.ok(html.includes('File ini bertujuan sebagai single source of truth'), html);
+    assert.ok(html.includes('<h2>2. Simbol utama</h2>'), html);
+    assert.ok(html.includes('Berikut adalah simbol utama'), html);
+    assert.ok(html.includes('Jembatan Antar Sub-Sistem'), html);
+    assert.ok(html.includes('Menghubungkan komponen terpisah'), html);
+    assert.ok(html.includes('<h2>4. Kapan Harus Membuka atau Mengubah File Ini</h2>'), html);
+    assert.ok(html.includes('Kamu perlu membuka file ini jika'), html);
   });
 
   it('meng-escape HTML berbahaya sebelum render', () => {

@@ -1,33 +1,185 @@
+import * as fs from 'fs';
 import path from 'path';
 import * as vscode from 'vscode';
-import { t } from '../../i18n';
+import { t, buildWebviewI18n } from '../../i18n';
 import { GraphInsights } from '../../core/graph/graphInsights';
-import { buildLearningMindMapMermaid } from '../../core/graph/learningMindMap';
+import { GraphNode } from '../../core/graph/types';
+import {
+  buildLearningMindMapModel,
+  LearningMindMapModel
+} from '../../core/graph/learningMindMap';
 import { getLanguage } from '../../utils/config';
-import { preferredViewColumn } from '../../utils/editorLayout';
+import { preferredViewColumn, showDocumentInActiveColumn } from '../../utils/editorLayout';
 import { escapeJsonForScript } from './jsonScriptSafe';
+import { Logger } from '../../utils/logger';
 
 let activeMindMapPanel: vscode.WebviewPanel | undefined;
+let mindMapGeneration = 0;
+
+interface MindMapFromWebview {
+  type: 'ready' | 'nodeClick' | 'copySource' | 'webviewLife';
+  node?: Partial<GraphNode> & { id?: string; filePath?: string; name?: string; startLine?: number; endLine?: number };
+  source?: string;
+  generation?: number;
+  phase?: string;
+}
+
+function hostThemeMode(): 'light' | 'dark' {
+  const kind = vscode.window.activeColorTheme.kind;
+  return kind === vscode.ColorThemeKind.Light || kind === vscode.ColorThemeKind.HighContrastLight
+    ? 'light'
+    : 'dark';
+}
+
+function getNonce(): string {
+  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let text = '';
+  for (let i = 0; i < 32; i += 1) {
+    text += possible.charAt(Math.floor(Math.random() * possible.length));
+  }
+  return text;
+}
+
+function escapeHtmlAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function resolveMindMapNodeUri(node: { filePath?: string; id?: string }): vscode.Uri | null {
+  const candidate =
+    typeof node.filePath === 'string' && node.filePath.trim().length > 0
+      ? node.filePath.trim()
+      : typeof node.id === 'string'
+        ? node.id.trim()
+        : '';
+  if (!candidate || candidate.startsWith('folder:')) {
+    return null;
+  }
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(candidate) || candidate.startsWith('file:')) {
+    return vscode.Uri.parse(candidate);
+  }
+  return vscode.Uri.file(candidate);
+}
+
+async function openMindMapNode(node: {
+  id?: string;
+  filePath?: string;
+  name?: string;
+  startLine?: number;
+  endLine?: number;
+  kind?: string;
+}): Promise<void> {
+  if (!node.filePath) {
+    return;
+  }
+  const uri = resolveMindMapNodeUri(node);
+  if (!uri) {
+    return;
+  }
+  try {
+    const doc = await vscode.workspace.openTextDocument(uri);
+    const editor = await showDocumentInActiveColumn(doc, { preview: false });
+    const line = Math.max(0, (node.startLine || 1) - 1);
+    const pos = new vscode.Position(line, 0);
+    editor.selection = new vscode.Selection(pos, pos);
+    editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+  } catch (err) {
+    Logger.warn(`[mindmap] open node failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+function renderMindMapHtml(
+  webview: vscode.Webview,
+  extensionUri: vscode.Uri,
+  model: LearningMindMapModel,
+  generation: number
+): string {
+  const nonce = getNonce();
+  const lang = getLanguage();
+  const distDir = vscode.Uri.joinPath(extensionUri, 'dist', 'webview');
+  const indexFsPath = path.join(distDir.fsPath, 'index.html');
+
+  if (!fs.existsSync(indexFsPath)) {
+    return `<!DOCTYPE html><html lang="${escapeHtmlAttr(lang)}"><body style="font-family:sans-serif;padding:24px;background:#0A0E17;color:#E8ECF4">
+      <h2>${escapeHtmlAttr(t('webview.buildMissing'))}</h2>
+      <p>${escapeHtmlAttr(t('webview.buildHint'))}</p>
+    </body></html>`;
+  }
+
+  let html = fs.readFileSync(indexFsPath, 'utf8');
+
+  html = html.replace(/(href|src)="(\.\/[^"]+|\/assets\/[^"]+)"/g, (_match, attr: string, rel: string) => {
+    const clean = rel.replace(/^\.\//, '').replace(/^\//, '');
+    const assetUri = webview.asWebviewUri(vscode.Uri.joinPath(distDir, clean));
+    return `${attr}="${assetUri}"`;
+  });
+
+  html = html.replace(/<script(?![^>]*\bnonce=)/gi, `<script nonce="${nonce}"`);
+
+  const boot = escapeJsonForScript({
+    mode: 'mindmap',
+    mindMap: model,
+    insights: null,
+    bundle: null,
+    state: 'ready',
+    message: '',
+    view: 'architecture',
+    theme: hostThemeMode(),
+    generation,
+    llmStatus: 'ready',
+    llmMessage: '',
+    language: lang,
+    i18n: buildWebviewI18n(lang)
+  });
+
+  const csp = [
+    `default-src 'none'`,
+    `img-src ${webview.cspSource} data: blob:`,
+    `style-src ${webview.cspSource} 'unsafe-inline'`,
+    `script-src ${webview.cspSource} 'nonce-${nonce}'`,
+    `worker-src ${webview.cspSource} blob:`,
+    `font-src ${webview.cspSource} data:`
+  ].join('; ');
+
+  const inject = `
+  <meta http-equiv="Content-Security-Policy" content="${csp}">
+  <script nonce="${nonce}">window.__NEVERMIN_BOOT__=${boot};</script>
+`;
+
+  if (html.includes('</head>')) {
+    html = html.replace('</head>', `${inject}</head>`);
+  } else {
+    html = inject + html;
+  }
+
+  return html;
+}
 
 export function openLearningMindMap(
+  extensionUri: vscode.Uri,
   insights: GraphInsights,
   options: { folders?: string[] } = {}
 ): void {
   const lang = getLanguage();
-  const mermaidSource = buildLearningMindMapMermaid(insights, {
+  const model = buildLearningMindMapModel(insights, {
     lang,
     folders: options.folders
   });
   const title = lang === 'en' ? 'Learning Mind Map' : 'Mind Map Belajar';
+  mindMapGeneration += 1;
+  const generation = mindMapGeneration;
+  const webviewRoot = vscode.Uri.joinPath(extensionUri, 'dist', 'webview');
+  const iconUri = vscode.Uri.joinPath(extensionUri, 'media', 'icon.png');
 
   if (activeMindMapPanel) {
-    activeMindMapPanel.title = title;
-    activeMindMapPanel.webview.html = renderMindMapHtml(
-      activeMindMapPanel.webview,
-      mermaidSource,
-      insights
-    );
-    activeMindMapPanel.reveal(activeMindMapPanel.viewColumn ?? preferredViewColumn(), false);
+    const panel = activeMindMapPanel;
+    panel.title = title;
+    panel.iconPath = { light: iconUri, dark: iconUri };
+    panel.webview.html = renderMindMapHtml(panel.webview, extensionUri, model, generation);
+    panel.reveal(panel.viewColumn ?? preferredViewColumn(), false);
     return;
   }
 
@@ -38,163 +190,38 @@ export function openLearningMindMap(
     {
       enableScripts: true,
       retainContextWhenHidden: true,
-      localResourceRoots: [
-        vscode.Uri.file(path.dirname(require.resolve('mermaid/dist/mermaid.min.js')))
-      ]
+      localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media'), webviewRoot]
     }
   );
 
+  panel.iconPath = { light: iconUri, dark: iconUri };
   activeMindMapPanel = panel;
-  panel.webview.html = renderMindMapHtml(panel.webview, mermaidSource, insights);
+  panel.webview.html = renderMindMapHtml(panel.webview, extensionUri, model, generation);
+
+  const messageSub = panel.webview.onDidReceiveMessage(async (msg: MindMapFromWebview) => {
+    if (msg.type === 'ready' || msg.type === 'webviewLife') {
+      return;
+    }
+    if (msg.type === 'copySource' && typeof msg.source === 'string') {
+      await vscode.env.clipboard.writeText(msg.source);
+      vscode.window.showInformationMessage(t('webview.copied'));
+      return;
+    }
+    if (msg.type === 'nodeClick' && msg.node) {
+      await openMindMapNode(msg.node);
+    }
+  });
+
+  const themeSub = vscode.window.onDidChangeActiveColorTheme(() => {
+    // Re-inject theme by reloading html with same model is heavy; React listens if we post — keep simple reload skip
+    void panel.webview.postMessage({ type: 'setTheme', mode: hostThemeMode() });
+  });
+
   panel.onDidDispose(() => {
+    messageSub.dispose();
+    themeSub.dispose();
     if (activeMindMapPanel === panel) {
       activeMindMapPanel = undefined;
     }
   });
-}
-
-function renderMindMapHtml(
-  webview: vscode.Webview,
-  mermaidSource: string,
-  insights: GraphInsights
-): string {
-  const mermaidPath = require.resolve('mermaid/dist/mermaid.min.js');
-  const mermaidUri = webview.asWebviewUri(vscode.Uri.file(mermaidPath));
-  const lang = getLanguage();
-  const subtitle =
-    lang === 'en'
-      ? `${insights.entryPoints.length} entries · ${insights.hubs.length} hubs · learn in this order`
-      : `${insights.entryPoints.length} entry · ${insights.hubs.length} hub · pelajari berurutan`;
-
-  const payload = escapeJsonForScript({
-    mermaid: mermaidSource,
-    subtitle
-  });
-  const nonce = Array.from({ length: 16 }, () => Math.floor(Math.random() * 16).toString(16)).join(
-    ''
-  );
-
-  const heading = t('webview.mindMap');
-  const mermaidMissing = t('webview.mermaidMissing');
-  const renderFail = t('flow.renderFail');
-  const openSource = t('webview.openSource');
-
-  return `<!DOCTYPE html>
-<html lang="${lang}">
-<head>
-  <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="
-    default-src 'none';
-    style-src ${webview.cspSource} 'unsafe-inline';
-    script-src ${webview.cspSource} 'nonce-${nonce}';
-  ">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${heading}</title>
-  <script nonce="${nonce}" src="${mermaidUri}"></script>
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #0b1220;
-      --panel: #111827;
-      --text: #e2e8f0;
-      --muted: #94a3b8;
-      --border: rgba(148, 163, 184, 0.22);
-      --accent: #38bdf8;
-      --accent-2: #a78bfa;
-    }
-    html, body {
-      margin: 0;
-      height: 100%;
-      background:
-        radial-gradient(ellipse 55% 40% at 0% 0%, rgba(56,189,248,0.12), transparent 55%),
-        radial-gradient(ellipse 50% 35% at 100% 10%, rgba(167,139,250,0.10), transparent 50%),
-        var(--bg);
-      color: var(--text);
-      font-family: "Segoe UI Variable", "Segoe UI", sans-serif;
-    }
-    .shell {
-      min-height: 100%;
-      display: grid;
-      grid-template-rows: auto 1fr;
-      align-content: start;
-    }
-    header {
-      display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap;
-      padding: 10px 14px; border-bottom: 1px solid var(--border);
-      background: rgba(17, 24, 39, 0.92);
-    }
-    h1 { margin: 0; font-size: 15px; font-weight: 750; letter-spacing: -0.02em; }
-    .meta { color: var(--muted); font-size: 12px; }
-    .canvas {
-      padding: 10px 12px 14px; overflow: auto;
-      display: flex; justify-content: center; align-items: flex-start;
-    }
-    .diagram {
-      width: min(100%, 1100px);
-      background: color-mix(in srgb, var(--panel) 92%, transparent);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 10px 12px 12px;
-    }
-    .diagram svg { max-width: 100%; height: auto; display: block; margin: 0 auto; }
-    .error { color: #fca5a5; font-size: 13px; }
-    details { margin-top: 14px; color: var(--muted); font-size: 12px; }
-    pre {
-      margin: 8px 0 0; padding: 10px 12px; border-radius: 10px;
-      background: #0b1220; border: 1px solid var(--border);
-      overflow: auto; color: #cbd5e1; white-space: pre-wrap;
-    }
-  </style>
-</head>
-<body>
-  <div class="shell">
-    <header>
-      <h1>${heading}</h1>
-      <div class="meta" id="meta"></div>
-    </header>
-    <div class="canvas">
-      <div class="diagram">
-        <div id="mount"></div>
-        <details>
-          <summary>${openSource}</summary>
-          <pre id="source"></pre>
-        </details>
-      </div>
-    </div>
-  </div>
-  <script nonce="${nonce}">
-    const payload = ${payload};
-    const mermaidMissing = ${JSON.stringify(mermaidMissing)};
-    const renderFail = ${JSON.stringify(renderFail)};
-    document.getElementById('meta').textContent = payload.subtitle || '';
-    document.getElementById('source').textContent = payload.mermaid || '';
-    const mount = document.getElementById('mount');
-
-    async function render() {
-      if (!window.mermaid) {
-        mount.innerHTML = '<p class="error">' + mermaidMissing + '</p>';
-        return;
-      }
-      if (!payload.mermaid || !String(payload.mermaid).trim()) {
-        mount.innerHTML = '<p class="error">' + renderFail + '</p>';
-        return;
-      }
-      try {
-        window.mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: 'strict',
-          theme: 'dark',
-          mindmap: { padding: 12, maxNodeWidth: 180 }
-        });
-        const id = 'mind_' + Date.now();
-        const { svg } = await window.mermaid.render(id, payload.mermaid);
-        mount.innerHTML = svg;
-      } catch (error) {
-        mount.innerHTML = '<p class="error">' + renderFail + ' ' + String(error) + '</p>';
-      }
-    }
-    render();
-  </script>
-</body>
-</html>`;
 }

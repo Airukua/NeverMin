@@ -20,11 +20,29 @@ describe('commands / sidebar shallow', () => {
       'nevermin.clearAnalysisSelection',
       'nevermin.setApiKey',
       'nevermin.selectProvider',
+      'nevermin.selectOllamaModel',
+      'nevermin.choosePrivacyMode',
+      'nevermin.setPrivacyPrivate',
+      'nevermin.setPrivacyPublic',
+      'nevermin.openFileFunctionGraph',
+      'nevermin.analyzeGitHistory',
+      'nevermin.wipeWorkspaceData',
       'nevermin.openOutputLogs',
       'nevermin.clearActivityLogs'
     ]) {
       assert.ok(commands.has(required), `missing command ${required}`);
     }
+
+    const pkgFull = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as {
+      contributes: {
+        configuration: { properties: Record<string, { default?: unknown }> };
+      };
+    };
+    const props = pkgFull.contributes.configuration.properties;
+    assert.strictEqual(props['nevermin.provider']?.default, 'ollama');
+    assert.strictEqual(props['nevermin.language']?.default, 'id');
+    assert.ok(props['nevermin.ollamaBaseUrl']);
+    assert.ok(props['nevermin.maxAnalysisFiles']);
   });
 
   it('SectionItem membuat tree item dengan contextValue section.*', () => {

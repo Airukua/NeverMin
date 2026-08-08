@@ -21,7 +21,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     id: 'gemini',
     label: 'Google Gemini',
     description: 'Google AI Studio / Gemini API',
-    defaultModel: 'gemini-2.5-flash',
+    defaultModel: 'gemini-flash-latest',
     kind: 'gemini',
     requiresApiKey: true,
     docsUrl: 'https://ai.google.dev/'

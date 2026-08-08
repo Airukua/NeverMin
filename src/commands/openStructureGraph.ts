@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { getCachedCodeGraph } from '../utils/codeGraphCache';
 import { getLatestRepoAnalysis } from '../utils/repoAnalysis';
+import { getLatestGitHistory } from '../utils/gitHistoryAnalysis';
 import { t } from '../i18n';
 import { createGraphPanel, updateGraphPanel } from '../ui/webview/graphPanel';
 import { preferredViewColumn } from '../utils/editorLayout';
@@ -25,6 +26,7 @@ export async function openFileFunctionGraph(
   const panel = createGraphPanel(context.extensionUri, graph, undefined, {
     state: 'ready',
     insights,
+    gitHistory: getLatestGitHistory(context) ?? null,
     view: 'functions',
     functionFilePath: args.filePath,
     focusNodeId: args.nodeId,
@@ -34,6 +36,7 @@ export async function openFileFunctionGraph(
   await updateGraphPanel(panel, graph, {
     state: 'ready',
     insights,
+    gitHistory: getLatestGitHistory(context) ?? null,
     view: 'functions',
     functionFilePath: args.filePath,
     focusNodeId: args.nodeId,

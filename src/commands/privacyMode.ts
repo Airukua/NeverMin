@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { t } from '../i18n';
 import { pickAndSetOllamaModel } from './selectOllamaModel';
+import { getProviderName } from '../utils/config';
+import { ensureCloudProviderForPublic } from '../utils/pickCloudProvider';
 import {
   getPrivacyMode,
   PrivacyMode,
@@ -49,6 +51,8 @@ export async function choosePrivacyMode(
 
   if (picked.mode === 'private') {
     await pickAndSetOllamaModel(context, { switchProvider: true });
+  } else if (getProviderName() === 'ollama') {
+    await ensureCloudProviderForPublic(context, { forcePick: true });
   }
 
   return picked.mode;
@@ -69,6 +73,9 @@ export function registerPrivacyModeCommands(context: vscode.ExtensionContext): v
     vscode.commands.registerCommand('nevermin.setPrivacyPublic', async () => {
       await setPrivacyMode(context, 'public');
       vscode.window.showInformationMessage(t('privacy.public.applied'));
+      if (getProviderName() === 'ollama') {
+        await ensureCloudProviderForPublic(context, { forcePick: true });
+      }
       await vscode.commands.executeCommand('nevermin.refreshSidebar');
     })
   );

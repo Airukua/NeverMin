@@ -1,4 +1,5 @@
 import { GraphInsightFlow, GraphInsightFlowStage } from './graphInsights';
+import { t } from '../../i18n';
 
 function escapeMermaidLabel(value: string): string {
   return value
@@ -66,7 +67,7 @@ export function buildMainFlowMermaid(flow: GraphInsightFlow): string {
   const uniqueStages = uniqueMainFlowStages(flow);
 
   if (uniqueStages.length === 0) {
-    return ['flowchart LR', '  empty["Belum ada flow"]'].join('\n');
+    return ['flowchart LR', `  empty["${t('graph.flow.mermaidEmpty')}"]`].join('\n');
   }
 
   const lines: string[] = [
