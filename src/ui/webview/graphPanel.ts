@@ -52,6 +52,7 @@ interface WebviewToExtensionMessage {
   repoRoot?: string;
   relativePath?: string;
   gapId?: string;
+  force?: boolean;
 }
 
 interface ExtensionToWebviewMessage {
@@ -605,7 +606,8 @@ export function createGraphPanel(
         expandKey: msg.node.expandKey,
         view: msg.view,
         sensitivityLevel: msg.node.sensitivityLevel,
-        sensitivityReason: msg.node.sensitivityReason
+        sensitivityReason: msg.node.sensitivityReason,
+        force: Boolean(msg.force)
       });
       return;
     }

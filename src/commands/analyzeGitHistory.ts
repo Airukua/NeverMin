@@ -57,7 +57,7 @@ function normalizeMarkdownNarrative(raw: string): string {
   let text = normalizeMarkdownSource(raw);
   if (!text) return '';
 
-  // LLM often ignores ## and writes **Alive** / **Frozen** walls of prose.
+  // LLM often ignores ## and writes **Alive** / **Frozen** / **Why** walls of prose.
   // Promote those into real headings so Open narrative + the panel parser both work.
   const hasStructuredAlive = /^#{1,3}\s+.*(alive|hidup)/im.test(text);
   if (!hasStructuredAlive && /\*\*(Alive|Hidup|Frozen|Beku)\*\*/i.test(text)) {
@@ -68,11 +68,25 @@ function normalizeMarkdownNarrative(raw: string): string {
       .replace(/\*\*Beku\*\*/gi, '\n\n### Beku\n\n');
   }
 
+  // Promote standalone bold section labels into ## headings (EN/ID).
+  text = text
+    .replace(/^\*\*Why the code looks like this\*\*\s*$/gim, '## Why the code looks like this')
+    .replace(/^\*\*Who to ask\*\*\s*$/gim, '## Who to ask')
+    .replace(/^\*\*Hidden coupling\*\*\s*$/gim, '## Hidden coupling')
+    .replace(/^\*\*How to explore next\*\*\s*$/gim, '## How to explore next')
+    .replace(/^\*\*Kenapa kode ditulis begini\*\*\s*$/gim, '## Kenapa kode ditulis begini')
+    .replace(/^\*\*Siapa yang paham\*\*\s*$/gim, '## Siapa yang paham')
+    .replace(/^\*\*Coupling tersembunyi\*\*\s*$/gim, '## Coupling tersembunyi')
+    .replace(/^\*\*Cara eksplorasi berikutnya\*\*\s*$/gim, '## Cara eksplorasi berikutnya');
+
   // Paths alone on a line → backticks (chips / markdown)
   text = text.replace(
     /^(?![#`*\-\d])((?:[\w.-]+\/)+[\w.*-]+(?:\.[\w*]+)?)\s*$/gm,
     '`$1`'
   );
+
+  // Collapse path broken across newlines: `foo`\n`bar` stays; bare path lines already backticked
+  text = text.replace(/`([^`\n]+)`\s*\n\s*(and|dan|or|atau|,)\s*\n\s*`([^`\n]+)`/gi, '`$1` $2 `$3`');
 
   return text.replace(/\n{3,}/g, '\n\n').trim();
 }

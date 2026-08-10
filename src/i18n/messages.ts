@@ -509,6 +509,8 @@ export type MessageKey =
   | 'header.insights'
   | 'header.llmBusy'
   | 'nodeMenu.explain'
+  | 'nodeMenu.viewExplain'
+  | 'nodeMenu.reExplain'
   | 'nodeMenu.flowChart'
   | 'nodeMenu.openFile'
   | 'nodeMenu.close'
@@ -1084,6 +1086,8 @@ const id: Catalog = {
   'header.insights': 'Insights',
   'header.llmBusy': 'LLM…',
   'nodeMenu.explain': 'Explain With LLM',
+  'nodeMenu.viewExplain': 'Lihat penjelasan',
+  'nodeMenu.reExplain': 'Jelaskan ulang',
   'nodeMenu.flowChart': 'Flow Chart',
   'nodeMenu.openFile': 'Buka file',
   'nodeMenu.close': 'Tutup menu',
@@ -1661,6 +1665,8 @@ const en: Catalog = {
   'header.insights': 'Insights',
   'header.llmBusy': 'LLM…',
   'nodeMenu.explain': 'Explain With LLM',
+  'nodeMenu.viewExplain': 'View explanation',
+  'nodeMenu.reExplain': 'Re-explain',
   'nodeMenu.flowChart': 'Flow Chart',
   'nodeMenu.openFile': 'Open file',
   'nodeMenu.close': 'Close menu',

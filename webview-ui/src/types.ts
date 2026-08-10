@@ -473,6 +473,6 @@ export type WebviewToExtensionMessage =
   | { type: 'openGitFile'; repoRoot: string; relativePath: string }
   | { type: 'openGitNarrative' }
   | { type: 'runGitHistory' }
-  | { type: 'explainNode'; node: Partial<MermaidNodeMeta>; view?: MermaidGraphView }
+  | { type: 'explainNode'; node: Partial<MermaidNodeMeta>; view?: MermaidGraphView; force?: boolean }
   | { type: 'explainGap'; gapId: string }
   | { type: 'openNodeFlow'; node: Partial<MermaidNodeMeta> };

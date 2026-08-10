@@ -210,6 +210,8 @@ export const WEBVIEW_I18N_KEYS = [
   'header.insights',
   'header.llmBusy',
   'nodeMenu.explain',
+  'nodeMenu.viewExplain',
+  'nodeMenu.reExplain',
   'nodeMenu.flowChart',
   'nodeMenu.openFile',
   'nodeMenu.close',

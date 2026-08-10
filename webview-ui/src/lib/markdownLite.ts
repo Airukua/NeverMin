@@ -315,24 +315,69 @@ function repairFragmentedNumberedTitles(text: string): string {
 }
 
 function isBodyStart(value: string): boolean {
-  return /^(file|fungsi|ini|berikut|dalam|kamu|anda|hal|saat|ketika|this|the|here|you|it)\b/i.test(
+  // Hindari "the/this/it" di sini — terlalu agresif memotong judul
+  // seperti "Why the code looks like this".
+  return /^(file|fungsi|ini|berikut|dalam|kamu|anda|hal|saat|ketika|here|you)\b/i.test(
     value.trim()
   );
 }
 
 function isStrongBodyStart(value: string): boolean {
-  return /^(berikut|dalam|kamu|anda|hal|saat|ketika|this|the|here|you|it)\b/i.test(value.trim());
+  return /^(berikut|dalam|kamu|anda|hal|saat|ketika|here|you)\b/i.test(value.trim());
 }
 
-/** Full section titles that must never be split (Git History / Insights prompts). */
-function isPreservedSectionHeading(rest: string): boolean {
-  return /^(what is alive(?:\s+vs\s+frozen)?|alive vs frozen|why the code looks like this|who to ask|hidden coupling|how to explore(?:\s+next)?|mana yang hidup(?:\s+vs\s+beku)?|kenapa kode(?:\s+ditulis\s+begini)?|siapa yang paham|coupling tersembunyi|cara eksplorasi(?:\s+berikutnya)?)\s*$/i.test(
-    rest.trim()
-  );
+/**
+ * Judul section Git History / Insights yang harus utuh.
+ * Urutkan panjang menurun supaya prefix terpanjang menang.
+ */
+const PRESERVED_SECTION_TITLES = [
+  'what is alive vs frozen',
+  'mana yang hidup vs beku',
+  'why the code looks like this',
+  'kenapa kode ditulis begini',
+  'cara eksplorasi berikutnya',
+  'how to explore next',
+  'alive vs frozen',
+  'what is alive',
+  'mana yang hidup',
+  'hidden coupling',
+  'coupling tersembunyi',
+  'siapa yang paham',
+  'who to ask',
+  'how to explore',
+  'cara eksplorasi',
+  'kenapa kode'
+].sort((a, b) => b.length - a.length);
+
+/**
+ * Jika rest diawali judul section yang dilindungi:
+ * - exact match → jangan dipecah (return null dari caller via 'keep')
+ * - judul + body nempel → pecah hanya setelah judul lengkap
+ */
+function splitPreservedSectionHeading(
+  rest: string
+): { title: string; body: string } | 'keep' | null {
+  const trimmed = rest.trim();
+  if (!trimmed) return null;
+  const lower = trimmed.toLowerCase();
+  for (const prefix of PRESERVED_SECTION_TITLES) {
+    if (lower === prefix) return 'keep';
+    if (!lower.startsWith(prefix)) continue;
+    const after = trimmed.slice(prefix.length);
+    if (!/^(\s+|[.:–—-])/.test(after)) continue;
+    const body = after.replace(/^[\s.:–—-]+/, '').trim();
+    const title = trimmed.slice(0, prefix.length);
+    if (!body) return 'keep';
+    return { title, body };
+  }
+  return null;
 }
 
 function splitShortTitleFromBody(rest: string): { title: string; body: string } | null {
-  if (isPreservedSectionHeading(rest)) return null;
+  const preserved = splitPreservedSectionHeading(rest);
+  if (preserved === 'keep') return null;
+  if (preserved) return preserved;
+
   const words = rest.trim().split(/\s+/);
   if (words.length < 3) return null;
 
@@ -343,7 +388,11 @@ function splitShortTitleFromBody(rest: string): { title: string; body: string } 
     const title = words.slice(0, n).join(' ');
     const body = words.slice(n).join(' ');
     if (!isTitleLike(title)) continue;
-    if (/^(adalah|adalahnya|yang|untuk|dengan|dari|dan|atau|in|of|for|to|with|is|are)\b/i.test(body)) {
+    // Jangan potong di tengah judul yang dilindungi (mis. "Why" | "the code…")
+    if (splitPreservedSectionHeading(title) === 'keep' || isPreservedTitlePrefix(title)) {
+      continue;
+    }
+    if (/^(adalah|adalahnya|yang|untuk|dengan|dari|dan|atau|in|of|for|to|with|is|are|the|this|it)\b/i.test(body)) {
       continue;
     }
     if (isBodyStart(body)) {
@@ -376,6 +425,15 @@ function splitShortTitleFromBody(rest: string): { title: string; body: string } 
     return { title: fallback[0].title, body: fallback[0].body };
   }
   return null;
+}
+
+/** True jika title adalah awalan judul section yang belum lengkap. */
+function isPreservedTitlePrefix(title: string): boolean {
+  const t = title.trim().toLowerCase();
+  if (!t) return false;
+  return PRESERVED_SECTION_TITLES.some(
+    (full) => full.startsWith(t + ' ') || full === t
+  );
 }
 
 function isTitleLike(value: string): boolean {

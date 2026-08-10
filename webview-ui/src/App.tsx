@@ -19,8 +19,77 @@ import { HeaderBar } from './components/HeaderBar';
 import { InsightsPane } from './components/InsightsPane';
 import { NodeActionMenu, type NodeActionMenuState } from './components/NodeActionMenu';
 import { NodeExplainModal, type NodeExplainState } from './components/NodeExplainModal';
+import {
+  clearCachedNodeExplain,
+  getCachedNodeExplain,
+  setCachedNodeExplain
+} from './lib/explainCache';
 import { leafToMeta } from './lib/mindMapMeta';
 import { setWebviewI18n, tw } from './i18n';
+
+function openCachedOrRequestExplain(
+  meta: MermaidNodeMeta,
+  anchor: { x: number; y: number },
+  setNodeExplain: (s: NodeExplainState | null) => void,
+  request: () => void
+) {
+  const cached = getCachedNodeExplain(meta);
+  if (cached?.text?.trim()) {
+    setNodeExplain({
+      meta,
+      x: anchor.x,
+      y: anchor.y,
+      status: 'ready',
+      text: cached.text,
+      thinking: cached.thinking,
+      scope: cached.scope,
+      sensitivityLevel: cached.sensitivityLevel ?? meta.sensitivityLevel,
+      sensitivityReason: cached.sensitivityReason ?? meta.sensitivityReason
+    });
+    return;
+  }
+  setNodeExplain({
+    meta,
+    x: anchor.x,
+    y: anchor.y,
+    status: 'loading',
+    sensitivityLevel: meta.sensitivityLevel,
+    sensitivityReason: meta.sensitivityReason,
+    message: tw('explain.modal.loading')
+  });
+  request();
+}
+
+function requestFreshExplain(
+  meta: MermaidNodeMeta,
+  anchor: { x: number; y: number },
+  setNodeExplain: (s: NodeExplainState | null) => void,
+  request: () => void
+) {
+  clearCachedNodeExplain(meta);
+  setNodeExplain({
+    meta,
+    x: anchor.x,
+    y: anchor.y,
+    status: 'loading',
+    sensitivityLevel: meta.sensitivityLevel,
+    sensitivityReason: meta.sensitivityReason,
+    message: tw('explain.modal.loading')
+  });
+  request();
+}
+
+function rememberExplainResult(state: NodeExplainState): void {
+  if (state.status !== 'ready' || !state.text?.trim()) return;
+  setCachedNodeExplain(state.meta, {
+    text: state.text,
+    thinking: state.thinking,
+    scope: state.scope,
+    sensitivityLevel: state.sensitivityLevel,
+    sensitivityReason: state.sensitivityReason,
+    title: state.meta.name
+  });
+}
 
 const GraphFlowCanvas = lazy(() =>
   import('./components/GraphFlowCanvas').then((m) => ({ default: m.GraphFlowCanvas }))
@@ -116,7 +185,7 @@ function MindMapApp({ model: initialModel, generation }: { model: LearningMindMa
         setNodeExplain((prev) => {
           if (!prev) {
             const title = payload.title || 'node';
-            return {
+            const next: NodeExplainState = {
               meta: {
                 id: title,
                 mermaidId: title,
@@ -142,8 +211,10 @@ function MindMapApp({ model: initialModel, generation }: { model: LearningMindMa
               message: payload.message,
               scope: payload.scope
             };
+            rememberExplainResult(next);
+            return next;
           }
-          return {
+          const next: NodeExplainState = {
             ...prev,
             status: payload.status,
             text: payload.text ?? prev.text,
@@ -158,6 +229,8 @@ function MindMapApp({ model: initialModel, generation }: { model: LearningMindMa
               filePath: payload.filePath || prev.meta.filePath
             }
           };
+          rememberExplainResult(next);
+          return next;
         });
       }
     });
@@ -184,15 +257,23 @@ function MindMapApp({ model: initialModel, generation }: { model: LearningMindMa
           onClose={() => setNodeMenu(null)}
           showFlowChart
           onExplain={(meta) => {
-            setNodeExplain({
-              meta,
-              x: nodeMenu.x,
-              y: nodeMenu.y + 12,
-              status: 'loading',
-              message: tw('explain.modal.loading')
-            });
+            const anchor = { x: nodeMenu.x, y: nodeMenu.y + 12 };
             setNodeMenu(null);
-            postToExtension({ type: 'explainNode', node: meta, view: 'architecture' });
+            openCachedOrRequestExplain(meta, anchor, setNodeExplain, () =>
+              postToExtension({ type: 'explainNode', node: meta, view: 'architecture' })
+            );
+          }}
+          onReExplain={(meta) => {
+            const anchor = { x: nodeMenu.x, y: nodeMenu.y + 12 };
+            setNodeMenu(null);
+            requestFreshExplain(meta, anchor, setNodeExplain, () =>
+              postToExtension({
+                type: 'explainNode',
+                node: meta,
+                view: 'architecture',
+                force: true
+              })
+            );
           }}
           onFlowChart={(meta) => {
             setNodeMenu(null);
@@ -296,7 +377,7 @@ function GraphApp() {
           setNodeExplain((prev) => {
             if (!prev) {
               const title = payload.title || 'node';
-              return {
+              const next: NodeExplainState = {
                 meta: {
                   id: title,
                   mermaidId: title,
@@ -322,8 +403,10 @@ function GraphApp() {
                 message: payload.message,
                 scope: payload.scope
               };
+              rememberExplainResult(next);
+              return next;
             }
-            return {
+            const next: NodeExplainState = {
               ...prev,
               status: payload.status,
               text: payload.text ?? prev.text,
@@ -342,6 +425,8 @@ function GraphApp() {
                   payload.sensitivityReason ?? prev.meta.sensitivityReason
               }
             };
+            rememberExplainResult(next);
+            return next;
           });
           break;
         }
@@ -604,17 +689,18 @@ function GraphApp() {
             !(view === 'functions' && !!expandedFunctionsFile)
           }
           onExplain={(meta) => {
-            setNodeExplain({
-              meta,
-              x: nodeMenu.x,
-              y: nodeMenu.y + 12,
-              status: 'loading',
-              sensitivityLevel: meta.sensitivityLevel,
-              sensitivityReason: meta.sensitivityReason,
-              message: tw('explain.modal.loading')
-            });
+            const anchor = { x: nodeMenu.x, y: nodeMenu.y + 12 };
             setNodeMenu(null);
-            postToExtension({ type: 'explainNode', node: meta, view });
+            openCachedOrRequestExplain(meta, anchor, setNodeExplain, () =>
+              postToExtension({ type: 'explainNode', node: meta, view })
+            );
+          }}
+          onReExplain={(meta) => {
+            const anchor = { x: nodeMenu.x, y: nodeMenu.y + 12 };
+            setNodeMenu(null);
+            requestFreshExplain(meta, anchor, setNodeExplain, () =>
+              postToExtension({ type: 'explainNode', node: meta, view, force: true })
+            );
           }}
           onFlowChart={(meta) => postToExtension({ type: 'openNodeFlow', node: meta })}
           onOpenFile={(meta) => postToExtension({ type: 'nodeClick', node: meta })}

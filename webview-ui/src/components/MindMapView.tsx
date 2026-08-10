@@ -113,10 +113,10 @@ function MindCardNodeView({ data, selected }: NodeProps<MindCardNode>) {
         className={[
           'box-border rounded-xl border px-3 py-2 text-left transition',
           data.variant === 'root'
-            ? 'min-h-[64px] min-w-[180px] bg-[var(--panel-l2)]'
+            ? 'min-w-[160px] bg-[var(--panel-l2)]'
             : data.variant === 'branch'
-              ? 'min-h-[56px] min-w-[150px] max-w-[240px] bg-[var(--panel)]'
-              : 'h-[76px] w-[220px] bg-[var(--panel)]',
+              ? 'min-w-[140px] max-w-[220px] bg-[var(--panel)]'
+              : 'w-[210px] bg-[var(--panel)]',
           selected ? 'bg-[var(--panel-l3)]' : '',
           clickable || branchToggle
             ? 'cursor-pointer hover:bg-[var(--panel-l2)]'
@@ -130,29 +130,21 @@ function MindCardNodeView({ data, selected }: NodeProps<MindCardNode>) {
               : undefined
         }}
       >
-        <div className="flex items-start gap-1.5">
+        <div className="flex items-center gap-1.5">
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[12px] font-semibold tracking-tight text-white">
+            <div className="truncate text-[12px] font-semibold leading-snug tracking-tight text-white">
               {data.title}
             </div>
             {data.subtitle ? (
-              <div className="mt-0.5 truncate font-mono text-[10px] text-[var(--text-lo)]">
+              <div className="mt-0.5 truncate font-mono text-[10px] leading-snug text-[var(--text-lo)]">
                 {data.subtitle}
-              </div>
-            ) : null}
-            {data.leaf?.role ? (
-              <div
-                className="mt-1 text-[9px] font-medium uppercase tracking-wider"
-                style={{ color }}
-              >
-                {data.leaf.role}
               </div>
             ) : null}
           </div>
           {data.hasChildren && data.expandId ? (
             <span
               data-mind-expand={data.expandId}
-              className="nodrag nopan mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-white/10 bg-white/[0.04] text-[var(--text-lo)]"
+              className="nodrag nopan inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-white/10 bg-white/[0.04] text-[var(--text-lo)]"
               style={{ color }}
               title={data.expanded ? 'Collapse' : 'Expand'}
             >
@@ -192,8 +184,8 @@ function shortPath(filePath?: string): string {
 }
 
 const COL_GAP = 280;
-const ROW_H = 88;
-const BRANCH_GAP = 48;
+const ROW_H = 58;
+const BRANCH_GAP = 36;
 
 function isExpanded(expanded: ReadonlySet<string>, id: string): boolean {
   return expanded.has(id);
@@ -391,11 +383,6 @@ function placeSide(
       position: { x: branchX, y: branchRow * ROW_H },
       data: {
         title: branch.label,
-        subtitle: open
-          ? `${count} items`
-          : count > 0
-            ? `${count} items · click to open`
-            : 'empty',
         accent: branch.accent,
         variant: 'branch',
         hasChildren: count > 0,
@@ -455,7 +442,6 @@ function toFlowElements(
     position: { x: 0, y: 0 },
     data: {
       title: model.rootTitle,
-      subtitle: model.subtitle,
       accent: 'entry',
       variant: 'root',
       hasChildren: model.branches.length > 0,

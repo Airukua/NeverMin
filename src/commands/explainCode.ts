@@ -16,6 +16,7 @@ import { setGraphPanelNodeExplain } from '../ui/webview/graphPanel';
 import { getCachedCodeGraph } from '../utils/codeGraphCache';
 import { getLatestRepoAnalysis } from '../utils/repoAnalysis';
 import { lookupSensitivity, type NodeSensitivity, type SensitivityLevel } from '../core/graph/sensitivity';
+import { normalizeMarkdownSource } from '../ui/webview/markdownLite';
 
 export interface ExplainNodeTarget {
   id?: string;
@@ -28,6 +29,8 @@ export interface ExplainNodeTarget {
   view?: ExplainGraphView | string;
   sensitivityLevel?: string;
   sensitivityReason?: string;
+  /** Bypass prompt cache and regenerate. */
+  force?: boolean;
 }
 
 function isAbortError(err: unknown): boolean {
@@ -48,6 +51,7 @@ async function runPromptCompletion(
     onProgressMessage?: (message: string) => void;
     /** Live token deltas (chunk). Accumulated text is caller-owned. */
     onToken?: (chunk: string) => void;
+    skipCache?: boolean;
   } = {}
 ): Promise<{ text: string; thinking?: string } | { cancelled: true } | { error: string; providerLabel: string }> {
   const prepared = await prepareLlmSession(context);
@@ -81,6 +85,7 @@ async function runPromptCompletion(
         baseUrl: session.baseUrl
       });
       const think = resolveOllamaThinkOption(session.provider, session.model, 'prefer-on');
+      const skipCache = Boolean(options.skipCache);
 
       const abort = new AbortController();
       const cancelSub = token.onCancellationRequested(() => abort.abort());
@@ -100,12 +105,16 @@ async function runPromptCompletion(
                   { onToken: options.onToken! },
                   {
                     think,
-                    signal: abort.signal
+                    signal: abort.signal,
+                    skipCache,
+                    cacheResponse: !skipCache
                   }
                 )
               : provider.complete(prompt, {
                   think,
-                  signal: abort.signal
+                  signal: abort.signal,
+                  skipCache,
+                  cacheResponse: !skipCache
                 }),
           withCompletionUsageSummary(summarizeExplainResult)
         );
@@ -209,7 +218,7 @@ export function registerExplainCommand(context: vscode.ExtensionContext): vscode
 }
 
 function formatExplainDocument(text: string, thinking?: string): string {
-  const body = text.trim();
+  const body = normalizeMarkdownSource(text);
   const think = thinking?.trim();
   if (!think) {
     return body;
@@ -336,6 +345,7 @@ export function registerExplainNodeCommand(context: vscode.ExtensionContext): vs
 
         const result = await runPromptCompletion(context, built.prompt, built.taskLabel, {
           showProgressNotification: false,
+          skipCache: Boolean(target?.force),
           onProgressMessage: (message) => {
             if (acc) return;
             void setGraphPanelNodeExplain({

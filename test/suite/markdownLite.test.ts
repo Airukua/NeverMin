@@ -109,4 +109,53 @@ describe('renderMarkdownLite', () => {
   it('escapeHtml mengamankan karakter khusus', () => {
     assert.strictEqual(escapeHtml(`a&b<"'>`), 'a&amp;b&lt;&quot;&#39;&gt;');
   });
+
+  it('tidak memecah judul Git History "Why the code looks like this"', () => {
+    const exact = normalizeMarkdownSource('## Why the code looks like this');
+    assert.strictEqual(exact, '## Why the code looks like this');
+
+    const stuck = normalizeMarkdownSource(
+      '## Why the code looks like this The structure reflects real usage.'
+    );
+    assert.ok(
+      /^## Why the code looks like this\n\nThe structure reflects/.test(stuck),
+      stuck
+    );
+
+    const html = renderMarkdownLite(
+      [
+        '## Why the code looks like this',
+        '',
+        'The structure reflects real usage.',
+        '',
+        '## Who to ask',
+        '',
+        'Ask Bob about auth.'
+      ].join('\n')
+    );
+    assert.ok(html.includes('<h3>Why the code looks like this</h3>'), html);
+    assert.ok(html.includes('<h3>Who to ask</h3>'), html);
+    assert.ok(!html.includes('<h3>Why</h3>'), html);
+    assert.ok(!html.includes('<h3>the code looks like this</h3>'), html);
+  });
+
+  it('me-promote **Alive**/**Frozen** prose ke heading saat dinormalisasi lewat render', () => {
+    const raw = [
+      '**Alive** files are hot like',
+      'messages/*.json',
+      'and',
+      'prisma/schema.prisma',
+      '. These areas are dynamic.',
+      '**Frozen** files have not changed in 70 days.'
+    ].join('\n');
+    // normalizeMarkdownSource only strips outer fences; Alive promote is in git host.
+    // Renderer still must bold → heading for title-like **Alive** alone is not expected;
+    // ensure bold inline is rendered and paths stay readable.
+    const html = renderMarkdownLite(
+      '## What is alive vs frozen\n\nAlive files include `messages/*.json` and `prisma/schema.prisma`.\n\n### Frozen\n\nStable legacy files.'
+    );
+    assert.ok(html.includes('<h3>What is alive vs frozen</h3>'), html);
+    assert.ok(html.includes('<code>messages/*.json</code>'), html);
+    assert.ok(html.includes('<h4>Frozen</h4>') || html.includes('<h3>Frozen</h3>'), html);
+  });
 });

@@ -30,9 +30,36 @@ function shortPath(filePath?: string): string {
   return parts.slice(-2).join('/');
 }
 
+/** Drop incomplete trailing markdown markers while tokens still arrive. */
+function softenStreamingMarkdown(source: string): string {
+  let text = source.replace(/\r\n/g, '\n');
+  // Unclosed fence: hide from opening ``` to end
+  const fenceCount = (text.match(/^```/gm) || []).length;
+  if (fenceCount % 2 === 1) {
+    const idx = text.lastIndexOf('```');
+    if (idx >= 0) text = text.slice(0, idx).trimEnd();
+  }
+  // Unclosed **bold**
+  const boldMarks = text.match(/\*\*/g);
+  if (boldMarks && boldMarks.length % 2 === 1) {
+    text = text.replace(/\*\*([^*]*)$/, '$1');
+  }
+  // Unclosed `code`
+  const ticks = text.match(/`/g);
+  if (ticks && ticks.length % 2 === 1) {
+    text = text.replace(/`([^`]*)$/, '$1');
+  }
+  return text;
+}
+
 export function NodeExplainModal({ state, onClose }: NodeExplainModalProps) {
   const live = state.status === 'streaming' || state.status === 'ready';
-  const bodyHtml = live && state.text ? renderMarkdownLite(state.text) : '';
+  // Saat streaming, sembunyikan marker markdown yang belum lengkap supaya UI tidak berantakan.
+  const displayText =
+    state.status === 'streaming' && state.text
+      ? softenStreamingMarkdown(state.text)
+      : state.text;
+  const bodyHtml = live && displayText ? renderMarkdownLite(displayText) : '';
   const thinking = state.status === 'ready' ? state.thinking?.trim() : '';
   const sensitivityLevel =
     state.sensitivityLevel || state.meta.sensitivityLevel;

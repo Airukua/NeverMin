@@ -32,9 +32,12 @@ interface MindMapFromWebview {
     mermaidId?: string;
   };
   source?: string;
+  view?: string;
+  force?: boolean;
   generation?: number;
   phase?: string;
-  view?: string;
+  detail?: string;
+  elapsedMs?: number;
 }
 
 function hostThemeMode(): 'light' | 'dark' {
@@ -233,7 +236,8 @@ export function openLearningMindMap(
         startLine: msg.node.startLine,
         endLine: msg.node.endLine,
         kind: msg.node.kind,
-        view: msg.view || 'architecture'
+        view: msg.view || 'architecture',
+        force: Boolean(msg.force)
       });
       return;
     }
