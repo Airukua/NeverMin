@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { FileCode2, GitBranch, Sparkles, X } from 'lucide-react';
 import type { MermaidNodeMeta } from '../types';
 import { tw } from '../i18n';
@@ -27,21 +29,51 @@ export function NodeActionMenu({
   showFlowChart = true
 }: NodeActionMenuProps) {
   const maxW = 240;
-  const left = Math.max(8, Math.min(menu.x, (typeof window !== 'undefined' ? window.innerWidth : 400) - maxW - 8));
-  const top = Math.max(8, Math.min(menu.y, (typeof window !== 'undefined' ? window.innerHeight : 400) - 180));
+  // Offset dari titik klik supaya gesture pembuka tidak “nembus” ke item menu.
+  const left = Math.max(
+    8,
+    Math.min(menu.x + 14, (typeof window !== 'undefined' ? window.innerWidth : 400) - maxW - 8)
+  );
+  const top = Math.max(
+    8,
+    Math.min(menu.y + 14, (typeof window !== 'undefined' ? window.innerHeight : 400) - 200)
+  );
 
-  return (
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    setArmed(false);
+    const id = window.setTimeout(() => setArmed(true), 180);
+    return () => window.clearTimeout(id);
+  }, [menu.meta.id, menu.x, menu.y]);
+
+  const run = (action: () => void) => {
+    if (!armed) return;
+    action();
+  };
+
+  const tree = (
     <>
       <button
         type="button"
-        className="fixed inset-0 z-40 cursor-default bg-transparent"
+        className="fixed inset-0 z-[10000] cursor-default bg-transparent"
+        style={{ pointerEvents: armed ? 'auto' : 'none' }}
         aria-label={tw('nodeMenu.close')}
-        onClick={onClose}
+        onMouseDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          run(onClose);
+        }}
       />
       <div
-        className="fixed z-50 w-[240px] overflow-hidden rounded-xl border border-white/10 bg-[var(--panel)] py-1.5 text-[var(--text-hi)]"
-        style={{ left, top }}
+        className="fixed z-[10001] w-[240px] overflow-hidden rounded-xl border border-white/10 bg-[var(--panel)] py-1.5 text-[var(--text-hi)] shadow-xl"
+        style={{ left, top, pointerEvents: armed ? 'auto' : 'none' }}
         role="menu"
+        onMouseDown={(event) => event.stopPropagation()}
+        onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-2 border-b border-white/5 px-3 py-2">
           <div className="min-w-0">
@@ -52,7 +84,7 @@ export function NodeActionMenu({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => run(onClose)}
             className="rounded-md p-0.5 text-[var(--text-lo)] transition hover:bg-white/[0.06] hover:text-white"
             aria-label={tw('nodeMenu.close')}
           >
@@ -64,10 +96,12 @@ export function NodeActionMenu({
           type="button"
           role="menuitem"
           className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[12px] transition hover:bg-white/[0.05]"
-          onClick={() => {
-            onExplain(menu.meta);
-            onClose();
-          }}
+          onClick={() =>
+            run(() => {
+              onExplain(menu.meta);
+              onClose();
+            })
+          }
         >
           <Sparkles size={15} className="shrink-0 text-[#2dd4bf]" />
           <span>{tw('nodeMenu.explain')}</span>
@@ -78,10 +112,12 @@ export function NodeActionMenu({
             type="button"
             role="menuitem"
             className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[12px] transition hover:bg-white/[0.05]"
-            onClick={() => {
-              onFlowChart(menu.meta);
-              onClose();
-            }}
+            onClick={() =>
+              run(() => {
+                onFlowChart(menu.meta);
+                onClose();
+              })
+            }
           >
             <GitBranch size={15} className="shrink-0 text-[#60a5fa]" />
             <span>{tw('nodeMenu.flowChart')}</span>
@@ -92,10 +128,12 @@ export function NodeActionMenu({
           type="button"
           role="menuitem"
           className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[12px] transition hover:bg-white/[0.05]"
-          onClick={() => {
-            onOpenFile(menu.meta);
-            onClose();
-          }}
+          onClick={() =>
+            run(() => {
+              onOpenFile(menu.meta);
+              onClose();
+            })
+          }
         >
           <FileCode2 size={15} className="shrink-0 text-[#fdba74]" />
           <span>{tw('nodeMenu.openFile')}</span>
@@ -103,4 +141,9 @@ export function NodeActionMenu({
       </div>
     </>
   );
+
+  if (typeof document === 'undefined') {
+    return tree;
+  }
+  return createPortal(tree, document.body);
 }

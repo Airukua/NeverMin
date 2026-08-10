@@ -819,6 +819,13 @@ export class CodeExplorerProvider implements vscode.TreeDataProvider<ExplorerNod
     const root = insights.repoRoot;
 
     if (insights.narrative) {
+      const narrativePreview = insights.narrative
+        .replace(/\*\*/g, '')
+        .replace(/`/g, '')
+        .replace(/^#+\s*/gm, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 240);
       items.push(
         new StatusItem(
           t('sidebar.git.narrative'),
@@ -829,7 +836,7 @@ export class CodeExplorerProvider implements vscode.TreeDataProvider<ExplorerNod
             title: t('sidebar.git.narrative'),
             arguments: [insights.narrative]
           },
-          insights.narrative.slice(0, 240)
+          narrativePreview
         )
       );
     }

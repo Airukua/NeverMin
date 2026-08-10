@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import path from 'path';
 import { registerExplainCommand, registerExplainNodeCommand } from './commands/explainCode';
+import { registerExplainContributionGapCommand } from './commands/explainContributionGap';
 import { registerOpenNodeFlowCommand } from './commands/openNodeFlow';
 import { registerAnalyzeRepoCommand, registerAnalyzeSelectedFilesCommand } from './commands/analyzeRepo';
 import {
@@ -61,6 +62,7 @@ export function activate(context: vscode.ExtensionContext): { context: vscode.Ex
 
   context.subscriptions.push(registerExplainCommand(context));
   context.subscriptions.push(registerExplainNodeCommand(context));
+  context.subscriptions.push(registerExplainContributionGapCommand(context));
   context.subscriptions.push(registerOpenNodeFlowCommand(context));
   context.subscriptions.push(registerAnalyzeRepoCommand(context));
   context.subscriptions.push(registerAnalyzeSelectedFilesCommand(context));
@@ -225,7 +227,7 @@ export function activate(context: vscode.ExtensionContext): { context: vscode.Ex
         vscode.window.showWarningMessage(t('msg.noMindMap'));
         return;
       }
-      openLearningMindMap(context.extensionUri, insights);
+      openLearningMindMap(context.extensionUri, insights, { context });
     })
   );
   context.subscriptions.push(

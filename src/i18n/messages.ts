@@ -227,8 +227,10 @@ export type MessageKey =
   | 'explain.done'
   | 'explain.failed'
   | 'explain.modal.badge'
+  | 'explain.modal.badgeLive'
   | 'explain.modal.loading'
   | 'explain.modal.loadingScope'
+  | 'explain.modal.streaming'
   | 'explain.modal.error'
   | 'explain.modal.cancelled'
   | 'explain.modal.empty'
@@ -237,6 +239,7 @@ export type MessageKey =
   | 'explain.scope.file'
   | 'explain.scope.module'
   | 'explain.scope.function'
+  | 'explain.scope.sensitivity'
   | 'analyze.fileCap'
   | 'analyze.cancelled'
   | 'analyze.noValidFiles'
@@ -316,6 +319,13 @@ export type MessageKey =
   | 'graph.functions.openHint'
   | 'graph.functions.noneInFile'
   | 'graph.functions.pickFile'
+  | 'graph.sensitive.empty'
+  | 'graph.sensitive.section.critical'
+  | 'graph.sensitive.section.criticalHint'
+  | 'graph.sensitive.section.high'
+  | 'graph.sensitive.section.highHint'
+  | 'graph.sensitive.section.medium'
+  | 'graph.sensitive.section.mediumHint'
   | 'graph.flow.mermaidEmpty'
   | 'graph.view.empty'
   | 'graph.loading'
@@ -349,6 +359,13 @@ export type MessageKey =
   | 'insights.structuralHint'
   | 'insights.structuralOverview'
   | 'insights.hubs'
+  | 'insights.sensitivity'
+  | 'insights.sensitivityHint'
+  | 'sensitivity.level.critical'
+  | 'sensitivity.level.high'
+  | 'sensitivity.level.medium'
+  | 'sensitivity.level.low'
+  | 'explain.modal.sensitivity'
   | 'insights.openMindMap'
   | 'view.architecture'
   | 'view.architecture.hint'
@@ -358,8 +375,87 @@ export type MessageKey =
   | 'view.flow.hint'
   | 'view.functions'
   | 'view.functions.hint'
+  | 'view.sensitive'
+  | 'view.sensitive.hint'
+  | 'view.compass'
+  | 'view.compass.hint'
   | 'view.git'
   | 'view.git.hint'
+  | 'compass.empty'
+  | 'compass.emptyHint'
+  | 'compass.runGit'
+  | 'compass.noGitHint'
+  | 'compass.summary.gaps'
+  | 'compass.summary.gapsHint'
+  | 'compass.summary.highPriority'
+  | 'compass.summary.highPriorityHint'
+  | 'compass.summary.safeRisk'
+  | 'compass.summary.safeRiskHint'
+  | 'compass.agentTitle'
+  | 'compass.agentSubtitle'
+  | 'compass.agentFallback'
+  | 'compass.llmInspecting'
+  | 'compass.llmSkipped'
+  | 'compass.docsUsed'
+  | 'compass.none'
+  | 'compass.section.gaps'
+  | 'compass.section.gapsHint'
+  | 'compass.section.read'
+  | 'compass.section.readHint'
+  | 'compass.section.steps'
+  | 'compass.section.stepsHint'
+  | 'compass.evidence'
+  | 'compass.opportunity'
+  | 'compass.confidence'
+  | 'compass.confidence.low'
+  | 'compass.confidence.medium'
+  | 'compass.confidence.high'
+  | 'compass.priority'
+  | 'compass.expand'
+  | 'compass.collapse'
+  | 'compass.detail.why'
+  | 'compass.detail.whyFallback'
+  | 'compass.detail.contribute'
+  | 'compass.openFile'
+  | 'compass.explain'
+  | 'compass.explain.again'
+  | 'compass.explain.loading'
+  | 'compass.explain.hint'
+  | 'compass.explain.error'
+  | 'compass.explain.why'
+  | 'compass.explain.example'
+  | 'compass.explain.options'
+  | 'compass.explain.confidenceWhy'
+  | 'compass.effort.low'
+  | 'compass.effort.medium'
+  | 'compass.effort.high'
+  | 'compass.risk.safe'
+  | 'compass.risk.needs-review'
+  | 'compass.risk.critical-zone'
+  | 'compass.type.orphan-promise'
+  | 'compass.type.bug-pattern'
+  | 'compass.type.yagni'
+  | 'compass.type.incomplete-feature'
+  | 'compass.type.coupling'
+  | 'compass.type.test-gap'
+  | 'compass.type.dead-config'
+  | 'compass.type.misleading-contract'
+  | 'compass.type.duplicate-logic'
+  | 'compass.type.silent-fallback'
+  | 'compass.type.missing-observability'
+  | 'compass.type.unbounded-resource'
+  | 'compass.type.missing-idempotency'
+  | 'compass.type.schema-api-drift'
+  | 'compass.type.dependency-risk'
+  | 'compass.type.feature-flag-graveyard'
+  | 'compass.type.ownership-gap'
+  | 'compass.type.convention-drift'
+  | 'compass.type.migration-incomplete'
+  | 'compass.type.naming-mismatch'
+  | 'compass.type.circular-dependency'
+  | 'compass.type.magic-value'
+  | 'compass.type.inconsistent-error-handling'
+  | 'compass.type.copy-pasted-config'
   | 'git.ui.empty'
   | 'git.ui.emptyHint'
   | 'git.ui.run'
@@ -399,6 +495,16 @@ export type MessageKey =
   | 'git.ui.llmStructuralHint'
   | 'git.ui.llmWaiting'
   | 'git.ui.llmNone'
+  | 'git.ui.sectionAlive'
+  | 'git.ui.sectionWhy'
+  | 'git.ui.sectionWho'
+  | 'git.ui.sectionCoupling'
+  | 'git.ui.activityLevel'
+  | 'git.ui.activityNoFrozen'
+  | 'git.ui.activityMix'
+  | 'git.ui.aliveFallback'
+  | 'git.ui.primaryOwner'
+  | 'git.ui.ownerFocusFallback'
   | 'header.copy'
   | 'header.insights'
   | 'header.llmBusy'
@@ -679,8 +785,10 @@ const id: Catalog = {
   'explain.done': 'Penjelasan siap.',
   'explain.failed': 'Gagal menjelaskan kode: {error}',
   'explain.modal.badge': 'Penjelasan AI',
+  'explain.modal.badgeLive': 'Penjelasan AI · Live',
   'explain.modal.loading': 'LLM sedang menjelaskan komponen ini…',
   'explain.modal.loadingScope': 'Menyiapkan konteks {scope}…',
+  'explain.modal.streaming': 'Menulis penjelasan…',
   'explain.modal.error': 'Gagal menjelaskan komponen ini.',
   'explain.modal.cancelled': 'Penjelasan dibatalkan.',
   'explain.modal.empty': 'Tidak ada penjelasan.',
@@ -689,6 +797,7 @@ const id: Catalog = {
   'explain.scope.file': 'file utuh',
   'explain.scope.module': 'folder module',
   'explain.scope.function': 'fungsi',
+  'explain.scope.sensitivity': 'sensitivitas',
   'analyze.fileCap':
     'NeverMIN membatasi analisis ke {max} file pertama (dari {total}). Centang subset lebih kecil untuk fokus.',
   'analyze.cancelled': 'Analisis NeverMIN dibatalkan.',
@@ -776,6 +885,13 @@ const id: Catalog = {
   'graph.functions.openHint': '{count} symbol · klik untuk membuka',
   'graph.functions.noneInFile': 'Tidak ada fungsi di {file}.',
   'graph.functions.pickFile': 'Pilih file untuk melihat fungsi.',
+  'graph.sensitive.empty': 'Belum ada kode sensitif terdeteksi. Jalankan analisis repo.',
+  'graph.sensitive.section.critical': 'Critical',
+  'graph.sensitive.section.criticalHint': 'Risiko tertinggi — salah ubah bisa merusak inti sistem',
+  'graph.sensitive.section.high': 'High',
+  'graph.sensitive.section.highHint': 'Dampak luas — auth, hub, payment, atau coupling kuat',
+  'graph.sensitive.section.medium': 'Medium',
+  'graph.sensitive.section.mediumHint': 'Perlu hati-hati — entry, pipeline, config, atau API',
   'graph.flow.mermaidEmpty': 'Belum ada flow',
   'graph.view.empty': 'Belum ada data untuk view ini.',
   'graph.loading': 'Memuat graph…',
@@ -810,6 +926,14 @@ const id: Catalog = {
     'Tanpa LLM, NeverMIN tetap menampilkan entry, hub, dan alur utama dari struktur repo.',
   'insights.structuralOverview': 'Ringkasan struktural',
   'insights.hubs': 'Core hubs',
+  'insights.sensitivity': 'Hati-hati mengubah',
+  'insights.sensitivityHint':
+    'Komponen dengan sensitivitas tinggi — salah ubah bisa berdampak luas ke sistem atau data.',
+  'sensitivity.level.critical': 'critical',
+  'sensitivity.level.high': 'high',
+  'sensitivity.level.medium': 'medium',
+  'sensitivity.level.low': 'low',
+  'explain.modal.sensitivity': 'Sensitivitas: {level}',
   'insights.openMindMap': 'Buka Mind Map',
   'view.architecture': 'Architecture',
   'view.architecture.hint': 'Peta sistem tingkat tinggi — entry point, hub, dan koneksi komponen utama.',
@@ -819,6 +943,90 @@ const id: Catalog = {
   'view.flow.hint': 'Jalur data utama — Input → Process → Output di codebase.',
   'view.functions': 'Functions',
   'view.functions.hint': 'Semua file berisi symbol — kartu tertutup sampai dibuka.',
+  'view.sensitive': 'Sensitive code',
+  'view.sensitive.hint':
+    'File/simbol berisiko tinggi — dibedakan critical / high / medium. Explain menjelaskan kenapa sensitif.',
+  'view.compass': 'Contribution',
+  'view.compass.hint':
+    'Gaps & Opportunities — deteksi celah, lalu peluang kontribusi (risiko hanya badge).',
+  'compass.empty': 'Belum ada Gaps & Opportunities',
+  'compass.emptyHint': 'Jalankan analisis repo agar NeverMIN mendeteksi gap dan peluang kontribusi.',
+  'compass.runGit': 'Analisis Git History',
+  'compass.noGitHint':
+    'Git History belum dijalankan — gap tetap terdeteksi, tapi tanpa sinyal coupling/churn.',
+  'compass.summary.gaps': 'Gap',
+  'compass.summary.gapsHint': 'Celah terdeteksi di codebase',
+  'compass.summary.highPriority': 'Prioritas tinggi',
+  'compass.summary.highPriorityHint': 'evidence × value / effort',
+  'compass.summary.safeRisk': 'Risiko rendah',
+  'compass.summary.safeRiskHint': 'Gap dengan badge aman disentuh',
+  'compass.agentTitle': 'Saran agen',
+  'compass.agentSubtitle': 'Jelaskan gap + saring false positive dari docs',
+  'compass.agentFallback':
+    'Tutup gap ber-evidence tinggi dan effort rendah dulu; baca entry point sebelum ubah hub.',
+  'compass.llmInspecting': 'Agen sedang menjelaskan gap dan peluang…',
+  'compass.llmSkipped': 'Mode struktural — gap dari detektor (LLM dilewati/gagal).',
+  'compass.docsUsed': 'Docs: {files}',
+  'compass.none': 'Tidak ada item di kategori ini.',
+  'compass.section.gaps': 'Gaps & Opportunities',
+  'compass.section.gapsHint': 'GAP · Evidence · Opportunity · Risk badge · Confidence',
+  'compass.section.read': 'Mulai baca di sini',
+  'compass.section.readHint': 'Entry point untuk memahami sistem dulu',
+  'compass.section.steps': 'Langkah pertama',
+  'compass.section.stepsHint': 'Quest singkat hari pertama',
+  'compass.evidence': 'Evidence',
+  'compass.opportunity': 'Opportunity',
+  'compass.confidence': 'Confidence',
+  'compass.confidence.low': 'rendah',
+  'compass.confidence.medium': 'sedang',
+  'compass.confidence.high': 'tinggi',
+  'compass.priority': 'prio {score}',
+  'compass.expand': 'Detail',
+  'compass.collapse': 'Tutup',
+  'compass.detail.why': 'Kenapa ini gap',
+  'compass.detail.whyFallback': 'Detektor menemukan pola yang menandakan celah di area ini.',
+  'compass.detail.contribute': 'Apa yang bisa dikontribusikan',
+  'compass.openFile': 'Buka file terkait',
+  'compass.explain': 'Explain detail',
+  'compass.explain.again': 'Explain ulang',
+  'compass.explain.loading': 'Menjelaskan…',
+  'compass.explain.hint':
+    'Tekan Explain detail untuk alasan semantik, contoh commit/kode, opsi kontribusi, dan justifikasi confidence.',
+  'compass.explain.error': 'Gagal menjelaskan gap. Coba lagi.',
+  'compass.explain.why': 'Kenapa ini penting',
+  'compass.explain.example': 'Contoh konkret',
+  'compass.explain.options': 'Opsi kontribusi (effort rendah → tinggi)',
+  'compass.explain.confidenceWhy': 'Kenapa confidence ini',
+  'compass.effort.low': 'effort rendah',
+  'compass.effort.medium': 'effort sedang',
+  'compass.effort.high': 'effort tinggi',
+  'compass.risk.safe': 'Aman',
+  'compass.risk.needs-review': 'Perlu review',
+  'compass.risk.critical-zone': 'Zona kritis',
+  'compass.type.orphan-promise': 'Orphan promise',
+  'compass.type.bug-pattern': 'Bug pattern',
+  'compass.type.yagni': 'YAGNI',
+  'compass.type.incomplete-feature': 'Incomplete',
+  'compass.type.coupling': 'Coupling',
+  'compass.type.test-gap': 'Test gap',
+  'compass.type.dead-config': 'Dead config',
+  'compass.type.misleading-contract': 'Misleading contract',
+  'compass.type.duplicate-logic': 'Duplicate logic',
+  'compass.type.silent-fallback': 'Silent fallback',
+  'compass.type.missing-observability': 'Missing observability',
+  'compass.type.unbounded-resource': 'Unbounded resource',
+  'compass.type.missing-idempotency': 'Missing idempotency',
+  'compass.type.schema-api-drift': 'Schema/API drift',
+  'compass.type.dependency-risk': 'Dependency risk',
+  'compass.type.feature-flag-graveyard': 'Feature flag graveyard',
+  'compass.type.ownership-gap': 'Ownership gap',
+  'compass.type.convention-drift': 'Convention drift',
+  'compass.type.migration-incomplete': 'Migration incomplete',
+  'compass.type.naming-mismatch': 'Naming mismatch',
+  'compass.type.circular-dependency': 'Circular dependency',
+  'compass.type.magic-value': 'Magic value',
+  'compass.type.inconsistent-error-handling': 'Inconsistent errors',
+  'compass.type.copy-pasted-config': 'Copy-pasted config',
   'view.git': 'Git Insights',
   'view.git.hint': 'Churn, file hidup/beku, pemilik, dan coupling dari riwayat git.',
   'git.ui.empty': 'Belum ada Git Insights',
@@ -861,6 +1069,17 @@ const id: Catalog = {
     'Narasi LLM belum tersedia. Menampilkan ringkasan heuristik dari commit sample.',
   'git.ui.llmWaiting': 'Menunggu narasi LLM…',
   'git.ui.llmNone': 'Belum ada ringkasan untuk ditampilkan.',
+  'git.ui.sectionAlive': 'Apa yang hidup vs beku',
+  'git.ui.sectionWhy': 'Kenapa kode terlihat begini',
+  'git.ui.sectionWho': 'Siapa yang ditanya',
+  'git.ui.sectionCoupling': 'Coupling tersembunyi',
+  'git.ui.activityLevel': 'Level aktivitas',
+  'git.ui.activityNoFrozen': 'Tidak ada file beku di jendela ini — churn tersebar di file hidup.',
+  'git.ui.activityMix': '{alive} hidup · {frozen} beku di jendela sample',
+  'git.ui.aliveFallback':
+    '{alive} file hidup dan {frozen} file beku di sample — fokus ke churn terbaru dulu.',
+  'git.ui.primaryOwner': 'Primary Owner',
+  'git.ui.ownerFocusFallback': 'Kontributor paling aktif di file kunci sample ini.',
   'header.copy': 'Salin',
   'header.insights': 'Insights',
   'header.llmBusy': 'LLM…',
@@ -1142,8 +1361,10 @@ const en: Catalog = {
   'explain.done': 'Explanation ready.',
   'explain.failed': 'Failed to explain code: {error}',
   'explain.modal.badge': 'AI Explanation',
+  'explain.modal.badgeLive': 'AI Explanation · Live',
   'explain.modal.loading': 'LLM is explaining this component…',
   'explain.modal.loadingScope': 'Preparing {scope} context…',
+  'explain.modal.streaming': 'Writing explanation…',
   'explain.modal.error': 'Failed to explain this component.',
   'explain.modal.cancelled': 'Explanation cancelled.',
   'explain.modal.empty': 'No explanation available.',
@@ -1152,6 +1373,7 @@ const en: Catalog = {
   'explain.scope.file': 'whole file',
   'explain.scope.module': 'module folder',
   'explain.scope.function': 'function',
+  'explain.scope.sensitivity': 'sensitivity',
   'analyze.fileCap':
     'NeverMIN limited analysis to the first {max} files (of {total}). Check a smaller subset to focus.',
   'analyze.cancelled': 'NeverMIN analysis cancelled.',
@@ -1239,6 +1461,13 @@ const en: Catalog = {
   'graph.functions.openHint': '{count} symbols · click to open',
   'graph.functions.noneInFile': 'No functions in {file}.',
   'graph.functions.pickFile': 'Pick a file to view its functions.',
+  'graph.sensitive.empty': 'No sensitive code detected yet. Run repo analysis.',
+  'graph.sensitive.section.critical': 'Critical',
+  'graph.sensitive.section.criticalHint': 'Highest risk — a bad change can break the system core',
+  'graph.sensitive.section.high': 'High',
+  'graph.sensitive.section.highHint': 'Wide impact — auth, hubs, payment, or strong coupling',
+  'graph.sensitive.section.medium': 'Medium',
+  'graph.sensitive.section.mediumHint': 'Handle with care — entry, pipeline, config, or API',
   'graph.flow.mermaidEmpty': 'No flow yet',
   'graph.view.empty': 'No data for this view yet.',
   'graph.loading': 'Loading graph…',
@@ -1273,6 +1502,14 @@ const en: Catalog = {
     'Without the LLM, NeverMIN still shows entries, hubs, and the main flow from repo structure.',
   'insights.structuralOverview': 'Structural overview',
   'insights.hubs': 'Core hubs',
+  'insights.sensitivity': 'Change with care',
+  'insights.sensitivityHint':
+    'High-sensitivity components — changing them wrongly can have wide system or data impact.',
+  'sensitivity.level.critical': 'critical',
+  'sensitivity.level.high': 'high',
+  'sensitivity.level.medium': 'medium',
+  'sensitivity.level.low': 'low',
+  'explain.modal.sensitivity': 'Sensitivity: {level}',
   'insights.openMindMap': 'Open Mind Map',
   'view.architecture': 'Architecture',
   'view.architecture.hint':
@@ -1283,6 +1520,90 @@ const en: Catalog = {
   'view.flow.hint': 'Main data path — Input → Process → Output through the codebase.',
   'view.functions': 'Functions',
   'view.functions.hint': 'All files with symbols — cards stay closed until you open one.',
+  'view.sensitive': 'Sensitive code',
+  'view.sensitive.hint':
+    'High-risk files/symbols — grouped critical / high / medium. Explain covers why they are sensitive.',
+  'view.compass': 'Contribution',
+  'view.compass.hint':
+    'Gaps & Opportunities — detect what’s missing, then turn gaps into contribution chances (risk is a badge only).',
+  'compass.empty': 'No Gaps & Opportunities yet',
+  'compass.emptyHint': 'Run repo analysis so NeverMIN can detect gaps and contribution opportunities.',
+  'compass.runGit': 'Analyze Git History',
+  'compass.noGitHint':
+    'Git History has not run yet — gaps still detect, but without coupling/churn signals.',
+  'compass.summary.gaps': 'Gaps',
+  'compass.summary.gapsHint': 'Detected codebase gaps',
+  'compass.summary.highPriority': 'High priority',
+  'compass.summary.highPriorityHint': 'evidence × value / effort',
+  'compass.summary.safeRisk': 'Low risk',
+  'compass.summary.safeRiskHint': 'Gaps with a safe-to-touch badge',
+  'compass.agentTitle': 'Agent advice',
+  'compass.agentSubtitle': 'Explain gaps + filter false positives from docs',
+  'compass.agentFallback':
+    'Close high-evidence low-effort gaps first; read entry points before changing hubs.',
+  'compass.llmInspecting': 'Agent is explaining gaps and opportunities…',
+  'compass.llmSkipped': 'Structural mode — detector gaps (LLM skipped/failed).',
+  'compass.docsUsed': 'Docs: {files}',
+  'compass.none': 'No items in this category.',
+  'compass.section.gaps': 'Gaps & Opportunities',
+  'compass.section.gapsHint': 'GAP · Evidence · Opportunity · Risk badge · Confidence',
+  'compass.section.read': 'Read first',
+  'compass.section.readHint': 'Entry points to understand the system',
+  'compass.section.steps': 'First steps',
+  'compass.section.stepsHint': 'Short day-one quest',
+  'compass.evidence': 'Evidence',
+  'compass.opportunity': 'Opportunity',
+  'compass.confidence': 'Confidence',
+  'compass.confidence.low': 'low',
+  'compass.confidence.medium': 'medium',
+  'compass.confidence.high': 'high',
+  'compass.priority': 'prio {score}',
+  'compass.expand': 'Details',
+  'compass.collapse': 'Close',
+  'compass.detail.why': 'Why this is a gap',
+  'compass.detail.whyFallback': 'A detector found a pattern that signals a gap in this area.',
+  'compass.detail.contribute': 'What you can contribute',
+  'compass.openFile': 'Open related file',
+  'compass.explain': 'Explain detail',
+  'compass.explain.again': 'Explain again',
+  'compass.explain.loading': 'Explaining…',
+  'compass.explain.hint':
+    'Press Explain detail for semantic why, a concrete commit/code example, contribution options, and confidence justification.',
+  'compass.explain.error': 'Failed to explain this gap. Try again.',
+  'compass.explain.why': 'Why this matters',
+  'compass.explain.example': 'Concrete example',
+  'compass.explain.options': 'Contribution options (low → high effort)',
+  'compass.explain.confidenceWhy': 'Why this confidence',
+  'compass.effort.low': 'low effort',
+  'compass.effort.medium': 'medium effort',
+  'compass.effort.high': 'high effort',
+  'compass.risk.safe': 'Safe',
+  'compass.risk.needs-review': 'Needs review',
+  'compass.risk.critical-zone': 'Critical zone',
+  'compass.type.orphan-promise': 'Orphan promise',
+  'compass.type.bug-pattern': 'Bug pattern',
+  'compass.type.yagni': 'YAGNI',
+  'compass.type.incomplete-feature': 'Incomplete',
+  'compass.type.coupling': 'Coupling',
+  'compass.type.test-gap': 'Test gap',
+  'compass.type.dead-config': 'Dead config',
+  'compass.type.misleading-contract': 'Misleading contract',
+  'compass.type.duplicate-logic': 'Duplicate logic',
+  'compass.type.silent-fallback': 'Silent fallback',
+  'compass.type.missing-observability': 'Missing observability',
+  'compass.type.unbounded-resource': 'Unbounded resource',
+  'compass.type.missing-idempotency': 'Missing idempotency',
+  'compass.type.schema-api-drift': 'Schema/API drift',
+  'compass.type.dependency-risk': 'Dependency risk',
+  'compass.type.feature-flag-graveyard': 'Feature flag graveyard',
+  'compass.type.ownership-gap': 'Ownership gap',
+  'compass.type.convention-drift': 'Convention drift',
+  'compass.type.migration-incomplete': 'Migration incomplete',
+  'compass.type.naming-mismatch': 'Naming mismatch',
+  'compass.type.circular-dependency': 'Circular dependency',
+  'compass.type.magic-value': 'Magic value',
+  'compass.type.inconsistent-error-handling': 'Inconsistent errors',
+  'compass.type.copy-pasted-config': 'Copy-pasted config',
   'view.git': 'Git Insights',
   'view.git.hint': 'Churn, alive/frozen files, owners, and couplings from git history.',
   'git.ui.empty': 'No Git Insights yet',
@@ -1325,6 +1646,17 @@ const en: Catalog = {
     'LLM narrative is unavailable. Showing a heuristic summary from the commit sample.',
   'git.ui.llmWaiting': 'Waiting for LLM narrative…',
   'git.ui.llmNone': 'No summary to show yet.',
+  'git.ui.sectionAlive': 'What is alive vs frozen',
+  'git.ui.sectionWhy': 'Why the code looks like this',
+  'git.ui.sectionWho': 'Who to ask',
+  'git.ui.sectionCoupling': 'Hidden coupling',
+  'git.ui.activityLevel': 'ACTIVITY LEVEL',
+  'git.ui.activityNoFrozen': 'No strictly frozen files in sampled window.',
+  'git.ui.activityMix': '{alive} alive · {frozen} frozen in sampled window',
+  'git.ui.aliveFallback':
+    '{alive} active files and {frozen} relatively frozen files in this commit sample.',
+  'git.ui.primaryOwner': 'Primary Owner',
+  'git.ui.ownerFocusFallback': 'Frequently touches this area based on git signals.',
   'header.copy': 'Copy',
   'header.insights': 'Insights',
   'header.llmBusy': 'LLM…',

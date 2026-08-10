@@ -3,7 +3,7 @@ import { GraphInsights } from '../graph/graphInsights';
 import { isNodeCardIcon, NODE_CARD_ICONS } from '../graph/nodeCardIcons';
 import { NeverminLanguage } from '../../i18n/types';
 
-const MAX_CONTEXT_CHARS = 24_000;
+const MAX_CONTEXT_CHARS = 12_000;
 
 function redactSecrets(text: string): string {
   return text
@@ -163,6 +163,63 @@ export function buildExplainFunctionPrompt(options: {
   ].join('\n');
 }
 
+/** Sensitive code tab: kenapa kode ini sensitif / berisiko diubah — bukan penjelasan fungsi umum. */
+export function buildExplainSensitivityPrompt(options: {
+  name: string;
+  kind: string;
+  filePath: string;
+  level: string;
+  reason: string;
+  signals: string[];
+  chunks: CodeChunk[];
+  lang?: NeverminLanguage;
+}): string {
+  const lang = options.lang ?? 'id';
+  const short = options.filePath.replace(/\\/g, '/').split('/').slice(-3).join('/');
+  const signals =
+    options.signals.length > 0 ? options.signals.join(', ') : lang === 'en' ? '(none listed)' : '(tidak ada)';
+  if (lang === 'en') {
+    return [
+      'You are a senior engineer assessing **change risk / sensitivity**.',
+      'Do NOT write a generic “what this function does” tutorial.',
+      'Explain **why this code is sensitive to change**: blast radius, trust/security/data impact, coupling, and what breaks if edited carelessly.',
+      'Use the heuristic signals as hints, then ground the answer in the code context.',
+      'Format: short Markdown with `##` headings on their own lines; body below. No whole-answer code fence.',
+      '',
+      '=== TARGET ===',
+      `${options.kind} ${options.name} · ${short}`,
+      `Sensitivity level: ${options.level}`,
+      `Heuristic reason: ${options.reason}`,
+      `Signals: ${signals}`,
+      '',
+      '=== CODE CONTEXT ===',
+      buildContextBlock(options.chunks, lang),
+      '',
+      '=== QUESTION ===',
+      `Why is "${options.name}" sensitive to change, and what should a developer verify before editing it?`
+    ].join('\n');
+  }
+  return [
+    'Kamu adalah senior engineer yang menilai **risiko ubah / sensitivitas kode**.',
+    'JANGAN menulis tutorial generik “fungsi ini untuk apa”.',
+    'Jelaskan **kenapa kode ini sensitif diubah**: blast radius, dampak trust/security/data, coupling, dan apa yang rusak jika diedit asal-asalan.',
+    'Pakai sinyal heuristik sebagai petunjuk, lalu landaskan jawaban pada konteks kode.',
+    'Format: Markdown singkat, heading `##` di baris sendiri, isi di bawahnya. Jangan code-fence seluruh jawaban.',
+    '',
+    '=== TARGET ===',
+    `${options.kind} ${options.name} · ${short}`,
+    `Level sensitivitas: ${options.level}`,
+    `Alasan heuristik: ${options.reason}`,
+    `Sinyal: ${signals}`,
+    '',
+    '=== KONTEKS KODE ===',
+    buildContextBlock(options.chunks, lang),
+    '',
+    '=== PERTANYAAN ===',
+    `Kenapa "${options.name}" sensitif diubah, dan apa yang harus dicek developer sebelum mengeditnya?`
+  ].join('\n');
+}
+
 /** Modules tab: folder utuh + inventory + Mermaid + cuplikan file. */
 export function buildExplainModulePrompt(options: {
   folder: string;
@@ -252,18 +309,21 @@ export function buildGitHistoryExplainPrompt(
   if (lang === 'en') {
     return [
       'You are an onboarding buddy explaining a codebase using Git history (not just AST).',
-      'Answer these questions in Markdown:',
+      'Return Markdown with EXACTLY these level-2 headings (copy spelling):',
       '## What is alive vs frozen',
-      '2-4 sentences on hotspots vs stable areas.',
       '## Why the code looks like this',
-      'Infer intent from recent commit messages — not a file dump. 3-6 bullets.',
       '## Who to ask',
-      'Point to likely owners from the data. 2-4 bullets.',
       '## Hidden coupling',
-      'Explain co-changed file pairs that may not show up in imports. 2-4 bullets.',
       '## How to explore next',
-      '3 concrete next steps for a newcomer.',
-      'Use English. Do not invent files/authors not listed. Do not wrap the whole answer in a code fence.',
+      '',
+      'Rules:',
+      '- Under each heading: short paragraphs or bullets — never dump a wall of prose.',
+      '- Under `## Why the code looks like this`: 2–4 bullets like `- Theme — detail with `path/file.ts``. Never put the heading words into the bullets.',
+      '- Under `## Who to ask`: 1–3 bullets like `- Name — why ask them; files in backticks`. Use the person name as the bullet lead.',
+      '- Put every file path inline in backticks like `src/app.ts` — never alone on its own line.',
+      '- Do not use **Alive** / **Frozen** bold labels instead of the ## headings.',
+      '- Do not invent files/authors not listed. Do not wrap the whole answer in a code fence.',
+      '- Use English.',
       '',
       '=== STRUCTURAL BULLETS ===',
       ...insights.summaryBullets.map((b) => `- ${b}`),
@@ -287,18 +347,21 @@ export function buildGitHistoryExplainPrompt(
 
   return [
     'Kamu adalah onboarding buddy yang menjelaskan codebase lewat Git history (bukan cuma AST).',
-    'Jawab pertanyaan berikut dalam Markdown:',
+    'Tulis Markdown dengan heading level-2 PERSIS seperti ini (salin ejaannya):',
     '## Mana yang hidup vs beku',
-    '2-4 kalimat tentang hotspot vs area stabil.',
     '## Kenapa kode ditulis begini',
-    'Inferensi niat dari pesan commit terakhir — bukan dump file. 3-6 bullet.',
     '## Siapa yang paham',
-    'Tunjuk owner yang paling masuk akal dari data. 2-4 bullet.',
     '## Coupling tersembunyi',
-    'Jelaskan pasangan file yang sering di-commit barengan (mungkin tak terlihat di import). 2-4 bullet.',
     '## Cara eksplorasi berikutnya',
-    '3 langkah konkret untuk developer baru.',
-    'Bahasa Indonesia. Jangan mengarang file/author yang tidak ada di data. Jangan bungkus seluruh jawaban dalam code fence.',
+    '',
+    'Aturan:',
+    '- Di bawah tiap heading: paragraf pendek atau bullet — jangan tembok teks panjang.',
+    '- Di `## Kenapa kode ditulis begini`: 2–4 bullet `- Tema — detail dengan `path/file.ts``. Jangan masukkan teks heading ke dalam bullet.',
+    '- Di `## Siapa yang paham`: 1–3 bullet `- Nama — alasan; file di backtick`. Awali dengan nama orang.',
+    '- Setiap path file taruh inline dalam backtick seperti `src/app.ts` — jangan sendirian di baris sendiri.',
+    '- Jangan pakai label bold **Alive**/**Frozen**/**Hidup**/**Beku** sebagai pengganti heading ##.',
+    '- Jangan mengarang file/author yang tidak ada di data. Jangan bungkus seluruh jawaban dalam code fence.',
+    '- Bahasa Indonesia.',
     '',
     '=== BULLET STRUKTURAL ===',
     ...insights.summaryBullets.map((b) => `- ${b}`),

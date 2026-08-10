@@ -1,0 +1,30 @@
+{
+  "nevermin.view.explorer.name": "NeverMIN",
+  "nevermin.viewsWelcome": "Choose how NeverMIN may use this workspace:\n[Private — local Ollama only](command:nevermin.setPrivacyPrivate)\n[Public — cloud LLM allowed](command:nevermin.setPrivacyPublic)\n\nThen open a folder and run analysis from the sidebar:\n[Open Folder](command:workbench.action.files.openFolder)\n\nPrivacy mode, file selection, Structure, and Git History live in the NeverMIN sidebar.",
+
+  "nevermin.language.markdownDescription": "Language for the NeverMIN sidebar, webviews, and LLM answers.\n\nYou can also change this from the sidebar **Settings**, or run `NeverMIN: Pilih Bahasa / Choose Language`.",
+  "nevermin.language.enum.id": "Indonesian (UI + LLM)",
+  "nevermin.language.enum.en": "English (UI + LLM)",
+
+  "nevermin.provider.markdownDescription": "Active LLM provider.\n\nPrivacy mode is chosen once per workspace in the sidebar (not a setting here):\n- **Private** — locked to Ollama; cloud API keys are cleared\n- **Public** — cloud providers allowed (Gemini, OpenAI, …). Pick a cloud provider, then run `NeverMIN: Simpan API Key`\n\nYou can also change the provider from sidebar **Settings**.",
+  "nevermin.provider.enum.ollama": "Ollama (local, no API key) — required in Private mode",
+  "nevermin.provider.enum.gemini": "Google Gemini (API key)",
+  "nevermin.provider.enum.openai": "OpenAI",
+  "nevermin.provider.enum.anthropic": "Anthropic Claude",
+  "nevermin.provider.enum.openrouter": "OpenRouter",
+  "nevermin.provider.enum.deepseek": "DeepSeek",
+  "nevermin.provider.enum.groq": "Groq",
+  "nevermin.provider.enum.mistral": "Mistral AI",
+  "nevermin.provider.enum.together": "Together AI",
+  "nevermin.provider.enum.xai": "xAI Grok",
+
+  "nevermin.model.markdownDescription": "LLM model id. Leave empty to use the provider default (for example Ollama `llama3.2`, Gemini `gemini-flash-latest`).\n\nFor Ollama, prefer `NeverMIN: Pilih Model Ollama` (lists installed / loaded models).\n\nThe model must match the active provider. Incompatible or retired ids are replaced with the provider default.",
+
+  "nevermin.temperature.markdownDescription": "LLM sampling temperature (0 = more deterministic). Used for Explain, insights narrative, node summaries, contribution gaps, and related LLM calls.",
+
+  "nevermin.ollamaBaseUrl.markdownDescription": "OpenAI-compatible base URL for Ollama.\n\nDefault: `http://127.0.0.1:11434/v1`. NeverMIN strips `/v1` when calling native Ollama APIs (`/api/tags`, `/api/ps`).",
+
+  "nevermin.ollamaNumCtx.markdownDescription": "Ollama context window (`num_ctx`).\n\nSmall models often default to 4096 tokens; large Explain prompts can exceed that (`exceed_context_size`). Raise to `8192` or `16384` if you have enough RAM/VRAM; lower it if Ollama runs out of memory.",
+
+  "nevermin.maxAnalysisFiles.markdownDescription": "Max files per analysis run (whole repo or files checked under sidebar **Select Files**).\n\nAnalysis builds the code graph, Structure tree, insights, and diagrams. Git History is a separate local `git` scan."
+}

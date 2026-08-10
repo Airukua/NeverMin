@@ -15,6 +15,9 @@ import {
   saveGitHistory,
   setGitHistoryStatus
 } from '../utils/gitHistoryAnalysis';
+import { getLatestRepoAnalysis, saveRepoAnalysis } from '../utils/repoAnalysis';
+import { getCachedCodeGraph } from '../utils/codeGraphCache';
+import { attachNodeSensitivity } from '../core/graph/sensitivity';
 import {
   LlmInsightsStatus,
   setGraphPanelGitHistory
@@ -51,7 +54,27 @@ function workspaceRoot(): string | undefined {
 }
 
 function normalizeMarkdownNarrative(raw: string): string {
-  return normalizeMarkdownSource(raw);
+  let text = normalizeMarkdownSource(raw);
+  if (!text) return '';
+
+  // LLM often ignores ## and writes **Alive** / **Frozen** walls of prose.
+  // Promote those into real headings so Open narrative + the panel parser both work.
+  const hasStructuredAlive = /^#{1,3}\s+.*(alive|hidup)/im.test(text);
+  if (!hasStructuredAlive && /\*\*(Alive|Hidup|Frozen|Beku)\*\*/i.test(text)) {
+    text = text
+      .replace(/\*\*Alive\*\*/gi, '\n\n## What is alive vs frozen\n\n')
+      .replace(/\*\*Hidup\*\*/gi, '\n\n## Mana yang hidup vs beku\n\n')
+      .replace(/\*\*Frozen\*\*/gi, '\n\n### Frozen\n\n')
+      .replace(/\*\*Beku\*\*/gi, '\n\n### Beku\n\n');
+  }
+
+  // Paths alone on a line → backticks (chips / markdown)
+  text = text.replace(
+    /^(?![#`*\-\d])((?:[\w.-]+\/)+[\w.*-]+(?:\.[\w*]+)?)\s*$/gm,
+    '`$1`'
+  );
+
+  return text.replace(/\n{3,}/g, '\n\n').trim();
 }
 
 async function loadCommits(repoRoot: string): Promise<ReturnType<typeof parseGitLogNameOnly>> {
@@ -209,6 +232,48 @@ export async function runGitHistoryWorkflow(context: vscode.ExtensionContext): P
     await saveGitHistory(context, insights);
     await setGitHistoryStatus(context, 'ready');
     await setGraphPanelGitHistory(insights, { gitLlmStatus: enriched.llmStatus });
+
+    // Refresh sensitivity dengan sinyal git baru (frozen/coupling).
+    const graph = getCachedCodeGraph(context);
+    const analysis = getLatestRepoAnalysis(context);
+    if (graph && analysis?.insights) {
+      const nextInsights = attachNodeSensitivity(
+        analysis.insights,
+        graph,
+        insights,
+        getLanguage()
+      );
+      await saveRepoAnalysis(context, { ...analysis, insights: nextInsights });
+      const { refreshOpenGraphPanelInsights } = await import('../ui/webview/graphPanel');
+
+      let compassOverride: import('../core/graph/contributionCompass').ContributionCompassModel | undefined;
+      const prepared = await prepareLlmSession(context);
+      if (prepared.ok) {
+        try {
+          const { enrichContributionCompassWithLlm } = await import('./contributionCompassLlm');
+          const docGlobs = await vscode.workspace.findFiles(
+            '{README,README.md,README.rst,CONTRIBUTING,CONTRIBUTING.md,docs/**/*.md}',
+            '{**/node_modules/**,**/.git/**,**/dist/**,**/out/**}',
+            40
+          );
+          const candidateDocPaths = docGlobs.map((u) => u.fsPath);
+          const compassOutcome = await enrichContributionCompassWithLlm({
+            insights: nextInsights,
+            graph,
+            gitHistory: insights,
+            session: prepared.session,
+            candidateDocPaths
+          });
+          compassOverride = compassOutcome.compass;
+        } catch (err) {
+          Logger.warn(`Contribution compass LLM setelah git gagal: ${err}`);
+        }
+      }
+      await refreshOpenGraphPanelInsights(graph, nextInsights, insights, {
+        compass: compassOverride
+      });
+    }
+
     await vscode.commands.executeCommand('nevermin.refreshSidebar');
 
     Logger.info(
@@ -249,7 +314,9 @@ export function registerOpenGitHistoryNarrativeCommand(
   return vscode.commands.registerCommand(
     'nevermin.openGitHistoryNarrative',
     async (narrative?: string) => {
-      const text = (narrative || getLatestGitHistory(context)?.narrative || '').trim();
+      const text = normalizeMarkdownNarrative(
+        narrative || getLatestGitHistory(context)?.narrative || ''
+      );
       if (!text) {
         vscode.window.showWarningMessage(t('git.noNarrative'));
         return;

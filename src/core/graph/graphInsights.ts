@@ -4,6 +4,7 @@ import { buildMainFlowMermaid } from './flowMermaid';
 import { NeverminLanguage } from '../../i18n/types';
 import { t } from '../../i18n';
 import type { LlmTokenUsage } from '../../types';
+import type { NodeSensitivity } from './sensitivity';
 import {
   callerModuleDiversity,
   computeCentrality,
@@ -82,6 +83,8 @@ export interface GraphInsights {
   nodeSummaries?: Record<string, string>;
   /** Ikon kartu dipilih LLM (key = GraphNode.id atau nama). */
   nodeIcons?: Record<string, string>;
+  /** Tingkat sensitivitas ubah-kode (heuristik + git). */
+  nodeSensitivity?: Record<string, NodeSensitivity>;
   /** Agregat token usage dari call LLM untuk insights ini. */
   tokenUsage?: LlmTokenUsage;
 }

@@ -11,12 +11,19 @@ import { buildContextFromFile } from '../context/contextBuilder';
 import {
   buildExplainFilePrompt,
   buildExplainFunctionPrompt,
-  buildExplainModulePrompt
+  buildExplainModulePrompt,
+  buildExplainSensitivityPrompt
 } from './promptBuilder';
 
-export type ExplainGraphView = 'architecture' | 'modules' | 'flow' | 'functions' | 'git';
+export type ExplainGraphView =
+  | 'architecture'
+  | 'modules'
+  | 'flow'
+  | 'functions'
+  | 'sensitive'
+  | 'git';
 
-export type ExplainScope = 'file' | 'module' | 'function';
+export type ExplainScope = 'file' | 'module' | 'function' | 'sensitivity';
 
 export interface ExplainNodeMeta {
   id?: string;
@@ -27,25 +34,42 @@ export interface ExplainNodeMeta {
   endLine?: number;
   expandKey?: string;
   view?: ExplainGraphView | string;
+  sensitivityLevel?: string;
+  sensitivityReason?: string;
+  sensitivitySignals?: string[];
 }
 
 export function resolveExplainScope(meta: ExplainNodeMeta): ExplainScope {
   const view = (meta.view || '').trim();
   const kind = (meta.kind || '').trim().toLowerCase();
+  const hasSymbolSpan =
+    typeof meta.startLine === 'number' &&
+    typeof meta.endLine === 'number' &&
+    meta.endLine >= meta.startLine;
+
+  if (view === 'sensitive') {
+    return 'sensitivity';
+  }
 
   if (view === 'modules' || kind === 'module' || kind === 'folder') {
     return 'module';
   }
 
+  // Function/method/class dengan rentang baris → jangan kirim file utuh
+  // (Architecture/Flow sering menampilkan kartu fungsi tapi dulu selalu scope=file).
+  if (
+    hasSymbolSpan &&
+    (kind === 'function' || kind === 'method' || kind === 'class' || view === 'functions')
+  ) {
+    return 'function';
+  }
+
   if (view === 'functions') {
-    if (kind === 'function' || kind === 'method' || kind === 'class') {
-      return 'function';
-    }
     // file-group overview → jelaskan file utuh
     return 'file';
   }
 
-  // Architecture & Flow: satu file utuh (bukan potongan symbol saja)
+  // Architecture & Flow (node file): satu file utuh
   return 'file';
 }
 
@@ -156,6 +180,7 @@ export interface BuiltExplainPrompt {
  * - Architecture/Flow → file utuh
  * - Modules → folder + inventory simbol + Mermaid + isi file
  * - Functions → hanya fungsi yang diklik
+ * - Sensitive → kenapa sensitif diubah
  */
 export async function buildScopedExplainPrompt(options: {
   meta: ExplainNodeMeta;
@@ -195,6 +220,35 @@ export async function buildScopedExplainPrompt(options: {
   }
 
   const fileContent = await readFile(filePath);
+
+  if (scope === 'sensitivity') {
+    const startLine = Math.max(1, meta.startLine ?? 1);
+    const endLine = Math.max(startLine, meta.endLine ?? startLine);
+    const kind = (meta.kind || '').trim().toLowerCase();
+    const hasSymbolSpan =
+      typeof meta.startLine === 'number' &&
+      typeof meta.endLine === 'number' &&
+      meta.endLine >= meta.startLine &&
+      (kind === 'function' || kind === 'method' || kind === 'class');
+    const chunks = hasSymbolSpan
+      ? await buildFunctionChunks(filePath, fileContent, startLine, endLine, name)
+      : await buildFileChunks(filePath, fileContent);
+    return {
+      scope,
+      title: name,
+      taskLabel: `explain sensitivity · ${name}`,
+      prompt: buildExplainSensitivityPrompt({
+        name,
+        kind: meta.kind || 'symbol',
+        filePath,
+        level: meta.sensitivityLevel || 'medium',
+        reason: meta.sensitivityReason || (lang === 'en' ? 'Marked sensitive.' : 'Ditandai sensitif.'),
+        signals: meta.sensitivitySignals ?? [],
+        chunks,
+        lang
+      })
+    };
+  }
 
   if (scope === 'function') {
     const startLine = Math.max(1, meta.startLine ?? 1);

@@ -3,7 +3,7 @@
 export type GraphPanelState = 'loading' | 'empty' | 'error' | 'ready';
 
 export type LlmInsightsStatus = 'idle' | 'inspecting' | 'ready' | 'skipped' | 'error';
-export type MermaidGraphView = 'architecture' | 'modules' | 'flow' | 'functions' | 'git';
+export type MermaidGraphView = 'architecture' | 'modules' | 'flow' | 'functions' | 'sensitive' | 'compass' | 'git';
 
 export interface MermaidNodeMeta {
   id: string;
@@ -16,9 +16,20 @@ export interface MermaidNodeMeta {
   summary?: string;
   /** Tab Functions overview: klik membuka grup file ini. */
   expandKey?: string;
+  sensitivityLevel?: SensitivityLevel;
+  sensitivityReason?: string;
 }
 
 export type GraphCardRole = 'entry' | 'hub' | 'pipeline' | 'support';
+
+export type SensitivityLevel = 'critical' | 'high' | 'medium' | 'low';
+
+export interface NodeSensitivity {
+  level: SensitivityLevel;
+  reason: string;
+  signals: string[];
+  score: number;
+}
 
 export interface GraphViewNode {
   id: string;
@@ -28,6 +39,8 @@ export interface GraphViewNode {
   role: GraphCardRole;
   summary?: string;
   iconKey?: string;
+  sensitivityLevel?: SensitivityLevel;
+  sensitivityReason?: string;
   startLine: number;
   endLine: number;
   row: number;
@@ -49,6 +62,8 @@ export interface GraphViewSection {
   label: string;
   hint?: string;
   role?: GraphCardRole;
+  /** Warna aksen section (mis. level sensitivitas). */
+  accent?: string;
 }
 
 export interface GraphViewModel {
@@ -70,6 +85,8 @@ export interface RepoMermaidBundle {
     flow: GraphViewModel;
     /** Overview file tertutup — klik kartu untuk buka isi fungsi. */
     functions: GraphViewModel;
+    /** Kode sensitif — dikelompokkan critical / high / medium. */
+    sensitive: GraphViewModel;
   };
   /** Detail fungsi per file (key = path ternormalisasi). */
   functionGroups?: Record<string, GraphViewModel>;
@@ -187,6 +204,7 @@ export interface WebviewInsights {
   panel?: InsightPanelContent;
   nodeSummaries?: Record<string, string>;
   nodeIcons?: Record<string, string>;
+  nodeSensitivity?: Record<string, NodeSensitivity>;
   tokenUsage?: {
     promptTokens?: number;
     completionTokens?: number;
@@ -200,6 +218,7 @@ export interface NeverminBoot {
   insights: WebviewInsights | null;
   mindMap?: LearningMindMapModel | null;
   gitHistory?: GitHistoryInsights | null;
+  compass?: ContributionCompassModel | null;
   state: GraphPanelState;
   message: string;
   view: MermaidGraphView;
@@ -213,6 +232,128 @@ export interface NeverminBoot {
   i18n?: Record<string, string>;
 }
 
+export type CompassTier = 'safe' | 'caution' | 'avoid' | 'read';
+export type CompassLlmStatus = 'idle' | 'pending' | 'ready' | 'skipped' | 'error';
+
+export type GapType =
+  | 'orphan-promise'
+  | 'bug-pattern'
+  | 'yagni'
+  | 'incomplete-feature'
+  | 'coupling'
+  | 'test-gap'
+  | 'dead-config'
+  | 'misleading-contract'
+  | 'duplicate-logic'
+  | 'silent-fallback'
+  | 'missing-observability'
+  | 'unbounded-resource'
+  | 'missing-idempotency'
+  | 'schema-api-drift'
+  | 'dependency-risk'
+  | 'feature-flag-graveyard'
+  | 'ownership-gap'
+  | 'convention-drift'
+  | 'migration-incomplete'
+  | 'naming-mismatch'
+  | 'circular-dependency'
+  | 'magic-value'
+  | 'inconsistent-error-handling'
+  | 'copy-pasted-config';
+
+export type RiskBadge = 'safe' | 'needs-review' | 'critical-zone';
+export type GapConfidence = 'low' | 'medium' | 'high';
+export type GapExplainStatus = 'idle' | 'loading' | 'streaming' | 'ready' | 'error';
+export type GapExplainEffort = 'low' | 'medium' | 'high';
+
+export interface GapExplainOption {
+  title: string;
+  detail: string;
+  effort: GapExplainEffort;
+}
+
+export interface GapExplainDetail {
+  whyItMatters: string;
+  concreteExample: string;
+  contributionOptions: GapExplainOption[];
+  confidenceJustification: string;
+  generatedAt: string;
+}
+
+export interface ContributionGap {
+  id: string;
+  title: string;
+  type: GapType;
+  evidence: string[];
+  opportunity: string;
+  riskBadge: RiskBadge;
+  confidence: GapConfidence;
+  evidenceStrength: number;
+  value: number;
+  effort: number;
+  priorityScore: number;
+  filePath?: string;
+  name?: string;
+  kind?: string;
+  startLine?: number;
+  endLine?: number;
+  llmExplanation?: string;
+  dismissed?: boolean;
+  explainStatus?: GapExplainStatus;
+  explainDetail?: GapExplainDetail;
+  explainDraft?: string;
+  explainError?: string;
+}
+
+export interface CompassItem {
+  id: string;
+  name: string;
+  kind: string;
+  filePath: string;
+  startLine: number;
+  endLine: number;
+  score: number;
+  reasons: string[];
+  llmReason?: string;
+  tier: CompassTier;
+}
+
+export interface CompassStep {
+  id: string;
+  title: string;
+  detail: string;
+  action?: 'openMindMap' | 'runGitHistory' | 'openNode';
+  targetId?: string;
+  targetName?: string;
+  filePath?: string;
+  startLine?: number;
+  endLine?: number;
+  kind?: string;
+}
+
+export interface ContributionCompassModel {
+  generatedAt: string;
+  hasGit: boolean;
+  llmStatus: CompassLlmStatus;
+  summary: {
+    gaps: number;
+    highPriority: number;
+    byType?: Partial<Record<GapType, number>>;
+    safe: number;
+    caution: number;
+    avoid: number;
+  };
+  agentAdvice?: string;
+  docsUsed?: string[];
+  gaps: ContributionGap[];
+  readFirst: CompassItem[];
+  firstSteps: CompassStep[];
+  /** @deprecated legacy lists — may be empty */
+  safeToTouch?: CompassItem[];
+  caution?: CompassItem[];
+  avoid?: CompassItem[];
+}
+
 export type MindMapBranchKind = 'start' | 'flow' | 'hubs' | 'modules' | 'later';
 
 export interface LearningMindMapLeaf {
@@ -223,6 +364,8 @@ export interface LearningMindMapLeaf {
   endLine?: number;
   role?: string;
   kind?: string;
+  /** Deeper breakdown — omit/empty means no further split. */
+  children?: LearningMindMapLeaf[];
 }
 
 export interface LearningMindMapBranch {
@@ -251,6 +394,7 @@ export type ExtensionToWebviewMessage =
       bundle?: RepoMermaidBundle | null;
       insights?: WebviewInsights | null;
       gitHistory?: GitHistoryInsights | null;
+      compass?: ContributionCompassModel | null;
       state?: GraphPanelState;
       message?: string;
       view?: MermaidGraphView;
@@ -288,14 +432,31 @@ export type ExtensionToWebviewMessage =
   | {
       type: 'setNodeExplain';
       nodeExplain?: {
-        status: 'loading' | 'ready' | 'error' | 'cancelled';
+        status: 'loading' | 'streaming' | 'ready' | 'error' | 'cancelled';
         title?: string;
         filePath?: string;
         text?: string;
         thinking?: string;
+        sensitivityLevel?: SensitivityLevel;
+        sensitivityReason?: string;
         message?: string;
-        scope?: 'file' | 'module' | 'function';
+        scope?: 'file' | 'module' | 'function' | 'sensitivity';
       } | null;
+    }
+  | {
+      type: 'setGapExplain';
+      gapId: string;
+      gapExplain: {
+        status: 'loading' | 'streaming' | 'ready' | 'error';
+        detail?: GapExplainDetail;
+        draft?: string;
+        message?: string;
+      };
+    }
+  | {
+      type: 'setMindMap';
+      mindMap?: LearningMindMapModel | null;
+      message?: string;
     };
 
 export type WebviewToExtensionMessage =
@@ -303,6 +464,8 @@ export type WebviewToExtensionMessage =
   | { type: 'webviewLife'; phase: string; detail?: string; generation?: number; elapsedMs?: number }
   | { type: 'renderStatus'; ok: boolean; detail?: string; view?: string }
   | { type: 'nodeClick'; node: Partial<MermaidNodeMeta> }
+  /** Explicit open-from-menu (Mind Map). Prefer this over nodeClick. */
+  | { type: 'openFile'; node: Partial<MermaidNodeMeta> }
   | { type: 'copySource'; source: string }
   | { type: 'openExternal' }
   | { type: 'openMainFlow'; flow?: MainFlow | null }
@@ -311,4 +474,5 @@ export type WebviewToExtensionMessage =
   | { type: 'openGitNarrative' }
   | { type: 'runGitHistory' }
   | { type: 'explainNode'; node: Partial<MermaidNodeMeta>; view?: MermaidGraphView }
+  | { type: 'explainGap'; gapId: string }
   | { type: 'openNodeFlow'; node: Partial<MermaidNodeMeta> };

@@ -424,3 +424,12 @@ export function getOllamaBaseUrl(): string {
   const configured = vscode.workspace.getConfiguration(NEVERMIN_SECTION).get<string>('ollamaBaseUrl', '').trim();
   return configured || 'http://127.0.0.1:11434/v1';
 }
+
+/** Context window Ollama (`options.num_ctx`). Default 16384 — model kecil sering default 4096. */
+export function getOllamaNumCtx(): number {
+  const configured = vscode.workspace.getConfiguration(NEVERMIN_SECTION).get<number>('ollamaNumCtx', 16_384);
+  if (!Number.isFinite(configured)) {
+    return 16_384;
+  }
+  return Math.min(131_072, Math.max(2_048, Math.floor(configured)));
+}

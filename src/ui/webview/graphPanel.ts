@@ -5,6 +5,13 @@ import { t, buildWebviewI18n } from '../../i18n';
 import { CodeGraph, GraphNode } from '../../core/graph/types';
 import { GraphInsights } from '../../core/graph/graphInsights';
 import { GitHistoryInsights } from '../../core/git/gitHistoryInsights';
+import { attachNodeSensitivity } from '../../core/graph/sensitivity';
+import {
+  buildContributionCompass,
+  type ContributionCompassModel,
+  type CompassLlmStatus
+} from '../../core/graph/contributionCompass';
+import type { GapExplainDetail } from '../../core/graph/contributionGaps';
 import {
   GraphViewModel,
   MermaidGraphView,
@@ -14,7 +21,6 @@ import {
 } from '../../core/graph/repoMermaid';
 import { getLanguage } from '../../utils/config';
 import { escapeJsonForScript } from './jsonScriptSafe';
-import { openLearningMindMap } from './mindMapPanel';
 import { Logger } from '../../utils/logger';
 import { preferredViewColumn, showDocumentInActiveColumn } from '../../utils/editorLayout';
 
@@ -22,6 +28,7 @@ interface WebviewToExtensionMessage {
   type:
     | 'nodeClick'
     | 'explainNode'
+    | 'explainGap'
     | 'openNodeFlow'
     | 'openExternal'
     | 'openMainFlow'
@@ -44,6 +51,7 @@ interface WebviewToExtensionMessage {
   elapsedMs?: number;
   repoRoot?: string;
   relativePath?: string;
+  gapId?: string;
 }
 
 interface ExtensionToWebviewMessage {
@@ -55,10 +63,12 @@ interface ExtensionToWebviewMessage {
     | 'setI18n'
     | 'setGitHistory'
     | 'setNodeFlow'
-    | 'setNodeExplain';
+    | 'setNodeExplain'
+    | 'setGapExplain';
   bundle?: RepoMermaidBundle | null;
   insights?: GraphInsights | null;
   gitHistory?: GitHistoryInsights | null;
+  compass?: ContributionCompassModel | null;
   state?: GraphPanelState;
   message?: string;
   mode?: 'light' | 'dark';
@@ -76,6 +86,13 @@ interface ExtensionToWebviewMessage {
     model: GraphViewModel;
   } | null;
   nodeExplain?: GraphPanelNodeExplain | null;
+  gapId?: string;
+  gapExplain?: {
+    status: 'loading' | 'streaming' | 'ready' | 'error';
+    detail?: GapExplainDetail;
+    draft?: string;
+    message?: string;
+  };
 }
 
 export interface GraphPanelNodeFlow {
@@ -85,14 +102,16 @@ export interface GraphPanelNodeFlow {
 }
 
 export interface GraphPanelNodeExplain {
-  status: 'loading' | 'ready' | 'error' | 'cancelled';
+  status: 'loading' | 'streaming' | 'ready' | 'error' | 'cancelled';
   title?: string;
   filePath?: string;
   text?: string;
   /** Reasoning trace dari model thinking (Qwen3/Ollama). */
   thinking?: string;
+  sensitivityLevel?: 'critical' | 'high' | 'medium' | 'low';
+  sensitivityReason?: string;
   message?: string;
-  scope?: 'file' | 'module' | 'function';
+  scope?: 'file' | 'module' | 'function' | 'sensitivity';
 }
 
 export type GraphPanelState = 'loading' | 'empty' | 'error' | 'ready';
@@ -105,6 +124,7 @@ export interface GraphPanelOptions {
   message?: string;
   insights?: GraphInsights;
   gitHistory?: GitHistoryInsights | null;
+  compass?: ContributionCompassModel | null;
   view?: MermaidGraphView;
   functionFilePath?: string;
   focusNodeId?: string;
@@ -115,6 +135,7 @@ export interface GraphPanelOptions {
 const panelBundles = new WeakMap<vscode.WebviewPanel, RepoMermaidBundle>();
 const panelInsights = new WeakMap<vscode.WebviewPanel, GraphInsights>();
 const panelGitHistory = new WeakMap<vscode.WebviewPanel, GitHistoryInsights>();
+const panelCompass = new WeakMap<vscode.WebviewPanel, ContributionCompassModel>();
 const panelLlmStatus = new WeakMap<
   vscode.WebviewPanel,
   { status: LlmInsightsStatus; message?: string }
@@ -324,8 +345,45 @@ function toWebviewInsights(insights?: GraphInsights | null): GraphInsights | nul
     panel: insights.panel,
     nodeSummaries: insights.nodeSummaries,
     nodeIcons: insights.nodeIcons,
+    nodeSensitivity: insights.nodeSensitivity,
     tokenUsage: insights.tokenUsage
   };
+}
+
+function withSensitivity(
+  graph: CodeGraph,
+  insights: GraphInsights | null | undefined,
+  gitHistory?: GitHistoryInsights | null
+): GraphInsights | null | undefined {
+  if (!insights) return insights;
+  if (insights.nodeSensitivity && Object.keys(insights.nodeSensitivity).length > 0) {
+    return insights;
+  }
+  return attachNodeSensitivity(insights, graph, gitHistory ?? null, getLanguage());
+}
+
+function compassStatusFromLlm(status?: LlmInsightsStatus): CompassLlmStatus {
+  if (status === 'inspecting') return 'pending';
+  if (status === 'ready') return 'ready';
+  if (status === 'skipped') return 'skipped';
+  if (status === 'error') return 'error';
+  return 'idle';
+}
+
+function resolveCompass(
+  insights: GraphInsights | null | undefined,
+  gitHistory: GitHistoryInsights | null | undefined,
+  llmStatus?: LlmInsightsStatus,
+  override?: ContributionCompassModel | null
+): ContributionCompassModel | null {
+  if (override) return override;
+  if (!insights) return null;
+  return buildContributionCompass({
+    insights,
+    git: gitHistory ?? null,
+    lang: getLanguage(),
+    llmStatus: compassStatusFromLlm(llmStatus)
+  });
 }
 
 export function createGraphPanel(
@@ -334,7 +392,12 @@ export function createGraphPanel(
   onNodeClick?: (node: GraphNode) => void | Promise<void>,
   options: GraphPanelOptions = {}
 ): vscode.WebviewPanel {
-  const bundle = buildRepoMermaidBundle(graph, options.insights, {
+  const resolvedInsights = withSensitivity(
+    graph,
+    options.insights,
+    options.gitHistory ?? null
+  );
+  const bundle = buildRepoMermaidBundle(graph, resolvedInsights, {
     functionFilePath: options.functionFilePath,
     focusNodeId: options.focusNodeId
   });
@@ -348,8 +411,8 @@ export function createGraphPanel(
     panel.iconPath = iconPath;
     panelExtensionUri.set(panel, extensionUri);
     panelBundles.set(panel, bundle);
-    if (options.insights) {
-      panelInsights.set(panel, options.insights);
+    if (resolvedInsights) {
+      panelInsights.set(panel, resolvedInsights);
     } else {
       panelInsights.delete(panel);
     }
@@ -372,7 +435,7 @@ export function createGraphPanel(
       bundle,
       state,
       options.message,
-      options.insights,
+      resolvedInsights,
       options.view,
       generation,
       options.gitHistory ?? panelGitHistory.get(panel) ?? null
@@ -403,8 +466,8 @@ export function createGraphPanel(
   panelPendingMessages.set(panel, []);
   panelForceReloadCount.set(panel, 0);
   panelBundles.set(panel, bundle);
-  if (options.insights) {
-    panelInsights.set(panel, options.insights);
+  if (resolvedInsights) {
+    panelInsights.set(panel, resolvedInsights);
   }
   if (options.gitHistory) {
     panelGitHistory.set(panel, options.gitHistory);
@@ -419,7 +482,7 @@ export function createGraphPanel(
     bundle,
     state,
     options.message,
-    options.insights,
+    resolvedInsights,
     options.view,
     generation,
     options.gitHistory ?? null
@@ -503,9 +566,8 @@ export function createGraphPanel(
 
     if (msg.type === 'openMindMap') {
       const insights = panelInsights.get(panel);
-      const extensionUri = panelExtensionUri.get(panel);
-      if (insights && extensionUri) {
-        openLearningMindMap(extensionUri, insights);
+      if (insights) {
+        await vscode.commands.executeCommand('nevermin.openLearningMindMap', insights);
       } else {
         vscode.window.showWarningMessage(t('msg.noMindMap'));
       }
@@ -541,8 +603,15 @@ export function createGraphPanel(
         endLine: msg.node.endLine,
         kind: msg.node.kind,
         expandKey: msg.node.expandKey,
-        view: msg.view
+        view: msg.view,
+        sensitivityLevel: msg.node.sensitivityLevel,
+        sensitivityReason: msg.node.sensitivityReason
       });
+      return;
+    }
+
+    if (msg.type === 'explainGap' && msg.gapId) {
+      await vscode.commands.executeCommand('nevermin.explainContributionGap', msg.gapId);
       return;
     }
 
@@ -596,6 +665,8 @@ export function createGraphPanel(
     panelForceReloadCount.delete(panel);
     panelLastLifePhase.delete(panel);
     panelExtensionUri.delete(panel);
+    panelGitHistory.delete(panel);
+    panelCompass.delete(panel);
   });
 
   return panel;
@@ -606,14 +677,19 @@ export async function updateGraphPanel(
   graph: CodeGraph,
   options: GraphPanelOptions = {}
 ): Promise<void> {
-  const bundle = buildRepoMermaidBundle(graph, options.insights, {
+  const resolvedInsights = withSensitivity(
+    graph,
+    options.insights,
+    options.gitHistory ?? panelGitHistory.get(panel) ?? null
+  );
+  const bundle = buildRepoMermaidBundle(graph, resolvedInsights, {
     functionFilePath: options.functionFilePath,
     focusNodeId: options.focusNodeId
   });
   panelBundles.set(panel, bundle);
-  if (options.insights) {
-    panelInsights.set(panel, options.insights);
-  } else {
+  if (resolvedInsights) {
+    panelInsights.set(panel, resolvedInsights);
+  } else if (options.insights === null) {
     panelInsights.delete(panel);
   }
   if (options.gitHistory) {
@@ -635,13 +711,25 @@ export async function updateGraphPanel(
   }
   const llm = panelLlmStatus.get(panel);
   const gitLlm = panelGitLlmStatus.get(panel);
-  const insights = toWebviewInsights(options.insights ?? panelInsights.get(panel) ?? null);
+  const insights = toWebviewInsights(resolvedInsights ?? panelInsights.get(panel) ?? null);
   const gitHistory = options.gitHistory ?? panelGitHistory.get(panel) ?? null;
+  const compass = resolveCompass(
+    resolvedInsights ?? panelInsights.get(panel),
+    gitHistory,
+    llm?.status ?? options.llmStatus,
+    options.compass
+  );
+  if (compass) {
+    panelCompass.set(panel, compass);
+  } else {
+    panelCompass.delete(panel);
+  }
   const message: ExtensionToWebviewMessage = {
     type: 'setGraph',
     bundle,
     insights,
     gitHistory,
+    compass,
     state,
     message: options.message,
     view: options.view,
@@ -784,6 +872,22 @@ export async function setGraphPanelGitHistory(
   });
 }
 
+/** Setelah Git History selesai: rebuild bundle dengan sensitivity terbaru. */
+export async function refreshOpenGraphPanelInsights(
+  graph: CodeGraph,
+  insights: GraphInsights,
+  gitHistory?: GitHistoryInsights | null,
+  options?: { compass?: ContributionCompassModel | null }
+): Promise<void> {
+  if (!activeGraphPanel) return;
+  await updateGraphPanel(activeGraphPanel, graph, {
+    insights,
+    gitHistory: gitHistory ?? panelGitHistory.get(activeGraphPanel) ?? null,
+    compass: options?.compass,
+    state: graph.nodes.length > 0 ? 'ready' : 'empty'
+  });
+}
+
 /**
  * Tampilkan Flow Chart node di panel graph yang sama (GraphFlowCanvas),
  * bukan panel Mermaid terpisah.
@@ -812,10 +916,69 @@ export async function setGraphPanelView(view: MermaidGraphView): Promise<boolean
 export async function setGraphPanelNodeExplain(
   nodeExplain: GraphPanelNodeExplain | null
 ): Promise<boolean> {
+  let ok = false;
+  if (activeGraphPanel) {
+    await postToGraphPanel(activeGraphPanel, {
+      type: 'setNodeExplain',
+      nodeExplain
+    });
+    ok = true;
+  }
+  try {
+    const { setMindMapNodeExplain } = await import('./mindMapPanel');
+    if (await setMindMapNodeExplain(nodeExplain)) {
+      ok = true;
+    }
+  } catch {
+    /* mind map panel optional */
+  }
+  return ok;
+}
+
+export function getActiveGraphPanelCompass(): ContributionCompassModel | null {
+  if (!activeGraphPanel) return null;
+  return panelCompass.get(activeGraphPanel) ?? null;
+}
+
+export async function patchActiveGraphPanelGapExplain(
+  gapId: string,
+  payload: {
+    status: 'loading' | 'streaming' | 'ready' | 'error';
+    detail?: GapExplainDetail;
+    draft?: string;
+    message?: string;
+  }
+): Promise<boolean> {
   if (!activeGraphPanel) return false;
+  const current = panelCompass.get(activeGraphPanel);
+  if (current) {
+    const gaps = current.gaps.map((g) =>
+      g.id === gapId
+        ? {
+            ...g,
+            explainStatus: payload.status,
+            explainDetail: payload.detail ?? g.explainDetail,
+            explainDraft:
+              payload.status === 'ready'
+                ? undefined
+                : payload.draft !== undefined
+                  ? payload.draft
+                  : g.explainDraft,
+            explainError: payload.status === 'error' ? payload.message : undefined
+          }
+        : g
+    );
+    panelCompass.set(activeGraphPanel, { ...current, gaps });
+  }
   await postToGraphPanel(activeGraphPanel, {
-    type: 'setNodeExplain',
-    nodeExplain
+    type: 'setGapExplain',
+    gapId,
+    gapExplain: {
+      status: payload.status,
+      detail: payload.detail,
+      draft: payload.draft,
+      message: payload.message
+    }
   });
   return true;
 }
@@ -909,11 +1072,14 @@ function renderHtml(
 
   let html = fs.readFileSync(indexFsPath, 'utf8');
 
-  html = html.replace(/(href|src)="(\.\/[^"]+|\/assets\/[^"]+)"/g, (_match, attr: string, rel: string) => {
-    const clean = rel.replace(/^\.\//, '').replace(/^\//, '');
-    const assetUri = webview.asWebviewUri(vscode.Uri.joinPath(distDir, clean));
-    return `${attr}="${assetUri}"`;
-  });
+  html = html.replace(
+    /(href|src)=["'](\.\/[^"']+|\/assets\/[^"']+)["']/g,
+    (_match, attr: string, rel: string) => {
+      const clean = rel.replace(/^\.\//, '').replace(/^\//, '');
+      const assetUri = webview.asWebviewUri(vscode.Uri.joinPath(distDir, clean));
+      return `${attr}="${assetUri}"`;
+    }
+  );
 
   html = html.replace(/<script(?![^>]*\bnonce=)/gi, `<script nonce="${nonce}"`);
 
@@ -921,6 +1087,11 @@ function renderHtml(
     bundle,
     insights: toWebviewInsights(initialInsights),
     gitHistory: initialGitHistory ?? null,
+    compass: resolveCompass(
+      initialInsights,
+      initialGitHistory ?? null,
+      inferBootLlmStatus(initialInsights)
+    ),
     state: initialState,
     message: initialMessage ?? '',
     view: initialView,

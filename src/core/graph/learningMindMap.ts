@@ -2,6 +2,7 @@ import { GraphInsights } from './graphInsights';
 import { NeverminLanguage } from '../../i18n/types';
 import { t } from '../../i18n';
 import { uniqueMainFlowStages } from './flowMermaid';
+import type { CodeGraph, GraphNode } from './types';
 
 function sanitizeMindLabel(value: string, max = 36): string {
   return value
@@ -59,6 +60,8 @@ export interface LearningMindMapLeaf {
   endLine?: number;
   role?: string;
   kind?: string;
+  /** Breakdown lebih dalam — kosong/undefined = tidak dipecah lagi. */
+  children?: LearningMindMapLeaf[];
 }
 
 export interface LearningMindMapBranch {
@@ -293,3 +296,159 @@ export function buildLearningMindMapMermaid(
 
   return lines.join('\n');
 }
+
+const BREAKDOWN_KINDS = new Set(['calls', 'uses', 'defines']);
+
+function normPath(p: string): string {
+  return p.replace(/\\/g, '/').toLowerCase();
+}
+
+function findGraphNode(graph: CodeGraph, leaf: LearningMindMapLeaf): GraphNode | undefined {
+  if (leaf.id && !leaf.id.startsWith('folder:')) {
+    const byId = graph.nodes.find((n) => n.id === leaf.id);
+    if (byId) return byId;
+  }
+  if (!leaf.filePath || !leaf.name) return undefined;
+  const wantPath = normPath(leaf.filePath);
+  const wantName = leaf.name.toLowerCase();
+  return graph.nodes.find(
+    (n) =>
+      normPath(n.filePath) === wantPath &&
+      n.name.toLowerCase() === wantName &&
+      n.kind !== 'file'
+  );
+}
+
+function nodeToLeaf(node: GraphNode, role?: string): LearningMindMapLeaf {
+  return {
+    id: node.id,
+    name: node.name,
+    filePath: node.filePath,
+    startLine: node.startLine,
+    endLine: node.endLine,
+    kind: node.kind,
+    role
+  };
+}
+
+/** Pecah leaf dari edge graph (calls/uses/defines). Tidak menambah anak kosong. */
+export function heuristicChildrenForLeaf(
+  leaf: LearningMindMapLeaf,
+  graph: CodeGraph,
+  limit = 5
+): LearningMindMapLeaf[] {
+  if (leaf.id.startsWith('folder:')) {
+    const folderKey = leaf.name.replace(/\\/g, '/').toLowerCase();
+    const seen = new Set<string>();
+    const out: LearningMindMapLeaf[] = [];
+    for (const node of graph.nodes) {
+      const fp = normPath(node.filePath);
+      if (!fp.includes(`/${folderKey}/`) && !fp.endsWith(`/${folderKey}`) && !fp.includes(folderKey)) {
+        continue;
+      }
+      if (node.kind === 'file') continue;
+      if (seen.has(node.id)) continue;
+      seen.add(node.id);
+      out.push(nodeToLeaf(node, 'symbol'));
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
+  const source = findGraphNode(graph, leaf);
+  if (!source) return [];
+
+  const seen = new Set<string>([source.id]);
+  const out: LearningMindMapLeaf[] = [];
+  for (const edge of graph.edges) {
+    if (edge.from !== source.id) continue;
+    if (!BREAKDOWN_KINDS.has(edge.kind)) continue;
+    if (seen.has(edge.to)) continue;
+    const target = graph.nodes.find((n) => n.id === edge.to);
+    if (!target || target.kind === 'file') continue;
+    seen.add(edge.to);
+    out.push(nodeToLeaf(target, edge.kind));
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/**
+ * Isi children dari CodeGraph (satu tingkat). Leaf yang sudah punya children tidak ditimpa.
+ * Tidak menulis children: [] — biarkan undefined agar UI tidak menggambar handle kosong.
+ */
+export function attachHeuristicMindMapBreakdown(
+  model: LearningMindMapModel,
+  graph: CodeGraph | null | undefined,
+  options: { maxPerLeaf?: number; depth?: number } = {}
+): LearningMindMapModel {
+  if (!graph?.nodes?.length) return model;
+  const maxPerLeaf = options.maxPerLeaf ?? 5;
+  const maxDepth = Math.max(1, Math.min(options.depth ?? 2, 3));
+
+  const expand = (leaf: LearningMindMapLeaf, depthLeft: number): LearningMindMapLeaf => {
+    if (leaf.children && leaf.children.length > 0) {
+      return {
+        ...leaf,
+        children: depthLeft > 1 ? leaf.children.map((c) => expand(c, depthLeft - 1)) : leaf.children
+      };
+    }
+    if (depthLeft <= 0) return leaf;
+    const kids = heuristicChildrenForLeaf(leaf, graph, maxPerLeaf);
+    if (kids.length === 0) return leaf;
+    return {
+      ...leaf,
+      children: depthLeft > 1 ? kids.map((c) => expand(c, depthLeft - 1)) : kids
+    };
+  };
+
+  return {
+    ...model,
+    branches: model.branches.map((branch) => ({
+      ...branch,
+      children: branch.children.map((leaf) => expand(leaf, maxDepth))
+    }))
+  };
+}
+
+/** Merge children dari map id→kids; skip empty; jangan timpa yang sudah ada. */
+export function mergeMindMapBreakdown(
+  model: LearningMindMapModel,
+  byParentId: Record<string, LearningMindMapLeaf[]>
+): LearningMindMapModel {
+  const apply = (leaf: LearningMindMapLeaf): LearningMindMapLeaf => {
+    const existing = leaf.children?.filter(Boolean) ?? [];
+    if (existing.length > 0) {
+      return { ...leaf, children: existing.map(apply) };
+    }
+    const extra = byParentId[leaf.id];
+    if (!extra || extra.length === 0) return leaf;
+    return { ...leaf, children: extra };
+  };
+
+  return {
+    ...model,
+    branches: model.branches.map((branch) => ({
+      ...branch,
+      children: branch.children.map(apply)
+    }))
+  };
+}
+
+/** Leaf L1 yang masih belum punya children (kandidat LLM). */
+export function listMindMapLeavesNeedingBreakdown(
+  model: LearningMindMapModel,
+  limit = 10
+): LearningMindMapLeaf[] {
+  const out: LearningMindMapLeaf[] = [];
+  for (const branch of model.branches) {
+    for (const leaf of branch.children) {
+      if (leaf.children && leaf.children.length > 0) continue;
+      if (!leaf.name) continue;
+      out.push(leaf);
+      if (out.length >= limit) return out;
+    }
+  }
+  return out;
+}
+

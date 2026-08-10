@@ -2,16 +2,19 @@ import * as vscode from 'vscode';
 import { createLlmProvider } from '../core/llm/llmClient';
 import { buildExplainPrompt } from '../core/llm/promptBuilder';
 import { buildScopedExplainPrompt, type ExplainGraphView } from '../core/llm/explainNodeContext';
+import { completeWithOptionalStream } from '../core/llm/streamComplete';
 import { buildContextFromFile } from '../core/context/contextBuilder';
 import { getLanguage, getLlmTemperature } from '../utils/config';
 import { Logger } from '../utils/logger';
 import { showDocumentInActiveColumn } from '../utils/editorLayout';
 import { runLoggedLlmCall, summarizeExplainResult, withCompletionUsageSummary } from '../utils/llmActivity';
-import { classifyLlmError, notifyLlmIssue } from '../utils/llmUserNotice';
+import { classifyLlmError, formatLlmErrorForUser, notifyLlmIssue } from '../utils/llmUserNotice';
 import { prepareLlmSession } from '../utils/llmSession';
 import { t } from '../i18n';
 import { setGraphPanelNodeExplain } from '../ui/webview/graphPanel';
 import { getCachedCodeGraph } from '../utils/codeGraphCache';
+import { getLatestRepoAnalysis } from '../utils/repoAnalysis';
+import { lookupSensitivity, type NodeSensitivity, type SensitivityLevel } from '../core/graph/sensitivity';
 
 export interface ExplainNodeTarget {
   id?: string;
@@ -22,6 +25,17 @@ export interface ExplainNodeTarget {
   endLine?: number;
   expandKey?: string;
   view?: ExplainGraphView | string;
+  sensitivityLevel?: string;
+  sensitivityReason?: string;
+}
+
+function isAbortError(err: unknown): boolean {
+  if (!err) return false;
+  if (err instanceof Error) {
+    if (err.name === 'AbortError') return true;
+    if (/aborted|abort/i.test(err.message)) return true;
+  }
+  return false;
 }
 
 async function runPromptCompletion(
@@ -31,6 +45,8 @@ async function runPromptCompletion(
   options: {
     showProgressNotification?: boolean;
     onProgressMessage?: (message: string) => void;
+    /** Live token deltas (chunk). Accumulated text is caller-owned. */
+    onToken?: (chunk: string) => void;
   } = {}
 ): Promise<{ text: string; thinking?: string } | { cancelled: true } | { error: string; providerLabel: string }> {
   const prepared = await prepareLlmSession(context);
@@ -43,13 +59,14 @@ async function runPromptCompletion(
   }
   const providerLabel = prepared.session.providerLabel;
   const showNotification = options.showProgressNotification !== false;
+  const live = typeof options.onToken === 'function';
 
   try {
     const run = async (
       progress: { report: (value: { message?: string }) => void },
       token: vscode.CancellationToken
     ): Promise<{ text: string; thinking?: string } | null> => {
-      const progressMsg = t('explain.progress');
+      const progressMsg = live ? t('explain.modal.streaming') : t('explain.progress');
       progress.report({ message: progressMsg });
       options.onProgressMessage?.(progressMsg);
       if (token.isCancellationRequested) {
@@ -62,20 +79,46 @@ async function runPromptCompletion(
         temperature: getLlmTemperature(),
         baseUrl: session.baseUrl
       });
-      const completion = await runLoggedLlmCall(
-        {
-          task: taskLabel,
-          provider: session.providerLabel,
-          model: session.model
-        },
-        () =>
-          provider.complete(prompt, {
-            // Tampilkan reasoning Qwen3/Ollama di modal Explain.
-            think: session.provider === 'ollama' ? true : undefined
-          }),
-        withCompletionUsageSummary(summarizeExplainResult)
-      );
-      return { text: completion.text, thinking: completion.thinking };
+
+      const abort = new AbortController();
+      const cancelSub = token.onCancellationRequested(() => abort.abort());
+
+      try {
+        const completion = await runLoggedLlmCall(
+          {
+            task: live ? `${taskLabel} (live)` : taskLabel,
+            provider: session.providerLabel,
+            model: session.model
+          },
+          () =>
+            live
+              ? completeWithOptionalStream(
+                  provider,
+                  prompt,
+                  { onToken: options.onToken! },
+                  {
+                    think: session.provider === 'ollama' ? true : undefined,
+                    signal: abort.signal
+                  }
+                )
+              : provider.complete(prompt, {
+                  think: session.provider === 'ollama' ? true : undefined,
+                  signal: abort.signal
+                }),
+          withCompletionUsageSummary(summarizeExplainResult)
+        );
+        if (token.isCancellationRequested) {
+          return null;
+        }
+        return { text: completion.text, thinking: completion.thinking };
+      } catch (err) {
+        if (token.isCancellationRequested || isAbortError(err)) {
+          return null;
+        }
+        throw err;
+      } finally {
+        cancelSub.dispose();
+      }
     };
 
     const answer = showNotification
@@ -90,7 +133,7 @@ async function runPromptCompletion(
       : await vscode.window.withProgress(
           {
             location: vscode.ProgressLocation.Window,
-            title: t('explain.progress'),
+            title: live ? t('explain.modal.streaming') : t('explain.progress'),
             cancellable: true
           },
           run
@@ -101,8 +144,11 @@ async function runPromptCompletion(
     }
     return answer;
   } catch (err) {
+    if (isAbortError(err)) {
+      return { cancelled: true };
+    }
     Logger.error(`explain gagal: ${err}`);
-    const message = err instanceof Error ? err.message : String(err);
+    const message = formatLlmErrorForUser(err);
     void notifyLlmIssue({
       kind: classifyLlmError(err),
       providerLabel,
@@ -140,6 +186,7 @@ export function registerExplainCommand(context: vscode.ExtensionContext): vscode
       selection
     );
     const prompt = buildExplainPrompt(t('explain.question'), chunks, getLanguage());
+    // Selection → markdown doc: keep one-shot (bukan modal Live).
     const result = await runPromptCompletion(context, prompt, 'explain selection');
 
     if ('cancelled' in result) {
@@ -185,7 +232,7 @@ async function readWorkspaceFile(filePath: string): Promise<string> {
   return doc.getText();
 }
 
-/** Explain symbol/file/module dari klik node graph — hasil ke modal webview. */
+/** Explain symbol/file/module dari klik node graph — hasil ke modal webview (Live stream). */
 export function registerExplainNodeCommand(context: vscode.ExtensionContext): vscode.Disposable {
   return vscode.commands.registerCommand(
     'nevermin.explainNode',
@@ -215,6 +262,22 @@ export function registerExplainNodeCommand(context: vscode.ExtensionContext): vs
 
       try {
         const graph = getCachedCodeGraph(context);
+        const sensitivity: NodeSensitivity | undefined =
+          lookupSensitivity(getLatestRepoAnalysis(context)?.insights?.nodeSensitivity, {
+            id: target?.id,
+            name: target?.name,
+            filePath: target?.filePath
+          }) ??
+          (target?.sensitivityLevel
+            ? {
+                level: target.sensitivityLevel as SensitivityLevel,
+                reason: target.sensitivityReason || '',
+                signals: [],
+                score: 0
+              }
+            : undefined);
+        const isSensitiveView = (target?.view || '').trim() === 'sensitive';
+
         const built = await buildScopedExplainPrompt({
           meta: {
             id: target?.id,
@@ -224,7 +287,10 @@ export function registerExplainNodeCommand(context: vscode.ExtensionContext): vs
             startLine: target?.startLine,
             endLine: target?.endLine,
             expandKey: target?.expandKey,
-            view: target?.view
+            view: target?.view,
+            sensitivityLevel: sensitivity?.level || target?.sensitivityLevel,
+            sensitivityReason: sensitivity?.reason || target?.sensitivityReason,
+            sensitivitySignals: sensitivity?.signals ?? []
           },
           graph,
           lang: getLanguage(),
@@ -236,7 +302,9 @@ export function registerExplainNodeCommand(context: vscode.ExtensionContext): vs
             ? t('explain.scope.module')
             : built.scope === 'function'
               ? t('explain.scope.function')
-              : t('explain.scope.file');
+              : built.scope === 'sensitivity'
+                ? t('explain.scope.sensitivity')
+                : t('explain.scope.file');
 
         await setGraphPanelNodeExplain({
           status: 'loading',
@@ -246,9 +314,28 @@ export function registerExplainNodeCommand(context: vscode.ExtensionContext): vs
           message: t('explain.modal.loadingScope', { scope: scopeLabel })
         });
 
+        let acc = '';
+        let lastPost = 0;
+        let flushTimer: ReturnType<typeof setTimeout> | null = null;
+        const sensitivityForUi = isSensitiveView ? sensitivity : undefined;
+
+        const postStream = () => {
+          void setGraphPanelNodeExplain({
+            status: 'streaming',
+            title: built.title,
+            filePath: target?.filePath,
+            scope: built.scope,
+            text: acc,
+            message: t('explain.modal.streaming'),
+            sensitivityLevel: sensitivityForUi?.level,
+            sensitivityReason: sensitivityForUi?.reason
+          });
+        };
+
         const result = await runPromptCompletion(context, built.prompt, built.taskLabel, {
           showProgressNotification: false,
           onProgressMessage: (message) => {
+            if (acc) return;
             void setGraphPanelNodeExplain({
               status: 'loading',
               title: built.title,
@@ -256,8 +343,33 @@ export function registerExplainNodeCommand(context: vscode.ExtensionContext): vs
               scope: built.scope,
               message
             });
+          },
+          onToken: (chunk) => {
+            acc += chunk;
+            const now = Date.now();
+            if (now - lastPost >= 70) {
+              lastPost = now;
+              if (flushTimer) {
+                clearTimeout(flushTimer);
+                flushTimer = null;
+              }
+              postStream();
+              return;
+            }
+            if (!flushTimer) {
+              flushTimer = setTimeout(() => {
+                flushTimer = null;
+                lastPost = Date.now();
+                postStream();
+              }, 70);
+            }
           }
         });
+
+        if (flushTimer) {
+          clearTimeout(flushTimer);
+          flushTimer = null;
+        }
 
         if ('cancelled' in result) {
           await setGraphPanelNodeExplain({
@@ -265,6 +377,7 @@ export function registerExplainNodeCommand(context: vscode.ExtensionContext): vs
             title: built.title,
             filePath: target?.filePath,
             scope: built.scope,
+            text: acc || undefined,
             message: t('explain.modal.cancelled')
           });
           return;
@@ -275,6 +388,7 @@ export function registerExplainNodeCommand(context: vscode.ExtensionContext): vs
             title: built.title,
             filePath: target?.filePath,
             scope: built.scope,
+            text: acc || undefined,
             message: t('explain.failed', { error: result.error })
           });
           return;
@@ -285,8 +399,10 @@ export function registerExplainNodeCommand(context: vscode.ExtensionContext): vs
           title: built.title,
           filePath: target?.filePath,
           scope: built.scope,
-          text: result.text,
-          thinking: result.thinking
+          text: result.text || acc,
+          thinking: result.thinking,
+          sensitivityLevel: sensitivityForUi?.level,
+          sensitivityReason: sensitivityForUi?.reason
         });
       } catch (err) {
         Logger.error(`explainNode gagal: ${err}`);

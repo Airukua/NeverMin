@@ -51,6 +51,16 @@ export function classifyLlmError(error: unknown): Exclude<LlmIssueKind, 'no_key'
   const status = readStatus(error);
   const blob = readBody(error).toLowerCase();
 
+  // Context window penuh — bukan kuota cloud
+  if (
+    blob.includes('exceed_context_size') ||
+    blob.includes('context size') ||
+    blob.includes('context length') ||
+    blob.includes('n_ctx')
+  ) {
+    return 'failed';
+  }
+
   if (
     status === 429 ||
     status === 402 ||
@@ -59,8 +69,7 @@ export function classifyLlmError(error: unknown): Exclude<LlmIssueKind, 'no_key'
     blob.includes('rate limit') ||
     blob.includes('rate_limit') ||
     blob.includes('billing') ||
-    blob.includes('insufficient_quota') ||
-    blob.includes('exceeded')
+    blob.includes('insufficient_quota')
   ) {
     return 'quota';
   }
@@ -78,6 +87,31 @@ export function classifyLlmError(error: unknown): Exclude<LlmIssueKind, 'no_key'
   }
 
   return 'failed';
+}
+
+/** Pesan singkat untuk error yang sering muncul (context terlalu kecil, dll). */
+export function formatLlmErrorForUser(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error ?? '');
+  const blob = raw.toLowerCase();
+  if (
+    blob.includes('exceed_context_size') ||
+    blob.includes('context size') ||
+    (blob.includes('n_prompt_tokens') && blob.includes('n_ctx'))
+  ) {
+    const promptMatch = raw.match(/n_prompt_tokens["']?\s*:\s*(\d+)/i);
+    const ctxMatch = raw.match(/n_ctx["']?\s*:\s*(\d+)/i);
+    const prompt = promptMatch?.[1];
+    const ctx = ctxMatch?.[1];
+    const sizeHint =
+      prompt && ctx
+        ? ` Prompt ~${prompt} token, context model ${ctx}.`
+        : '';
+    return (
+      `Prompt terlalu besar untuk context window Ollama.${sizeHint} ` +
+      `Naikkan nevermin.ollamaNumCtx (mis. 16384) atau jelaskan fungsi lebih kecil.`
+    );
+  }
+  return raw;
 }
 
 function issueMessage(issue: LlmIssue): string {

@@ -1,0 +1,30 @@
+{
+  "nevermin.view.explorer.name": "NeverMIN",
+  "nevermin.viewsWelcome": "Pilih cara NeverMIN boleh memakai workspace ini:\n[Private — hanya Ollama lokal](command:nevermin.setPrivacyPrivate)\n[Public — LLM cloud diizinkan](command:nevermin.setPrivacyPublic)\n\nLalu buka folder dan jalankan analisis dari sidebar:\n[Buka Folder](command:workbench.action.files.openFolder)\n\nMode privasi, pilih file, Structure, dan Git History ada di sidebar NeverMIN.",
+
+  "nevermin.language.markdownDescription": "Bahasa UI sidebar/webview NeverMIN dan bahasa jawaban LLM.\n\nBisa diganti dari sidebar **Pengaturan**, atau command `NeverMIN: Pilih Bahasa / Choose Language`.",
+  "nevermin.language.enum.id": "Bahasa Indonesia (UI + LLM)",
+  "nevermin.language.enum.en": "English (UI + LLM)",
+
+  "nevermin.provider.markdownDescription": "Provider LLM aktif.\n\nMode privasi dipilih sekali per workspace di sidebar (bukan setting di sini):\n- **Private** — dikunci ke Ollama; API key cloud dihapus\n- **Public** — boleh cloud (Gemini, OpenAI, …). Pilih provider cloud, lalu `NeverMIN: Simpan API Key`\n\nProvider juga bisa diganti dari sidebar **Pengaturan**.",
+  "nevermin.provider.enum.ollama": "Ollama (lokal, tanpa API key) — wajib di mode Private",
+  "nevermin.provider.enum.gemini": "Google Gemini (API key)",
+  "nevermin.provider.enum.openai": "OpenAI",
+  "nevermin.provider.enum.anthropic": "Anthropic Claude",
+  "nevermin.provider.enum.openrouter": "OpenRouter",
+  "nevermin.provider.enum.deepseek": "DeepSeek",
+  "nevermin.provider.enum.groq": "Groq",
+  "nevermin.provider.enum.mistral": "Mistral AI",
+  "nevermin.provider.enum.together": "Together AI",
+  "nevermin.provider.enum.xai": "xAI Grok",
+
+  "nevermin.model.markdownDescription": "Id model LLM. Kosongkan = default provider (contoh Ollama `llama3.2`, Gemini `gemini-flash-latest`).\n\nUntuk Ollama, pakai `NeverMIN: Pilih Model Ollama` (daftar model terpasang / loaded).\n\nModel harus cocok dengan provider aktif. Id yang tidak cocok atau sudah retired diganti ke default provider.",
+
+  "nevermin.temperature.markdownDescription": "Temperature sampling LLM (0 = lebih deterministik). Dipakai Explain, narasi insights, ringkas node, contribution gaps, dan panggilan LLM terkait.",
+
+  "nevermin.ollamaBaseUrl.markdownDescription": "Base URL OpenAI-compatible untuk Ollama.\n\nDefault: `http://127.0.0.1:11434/v1`. NeverMIN memotong `/v1` saat memanggil API native Ollama (`/api/tags`, `/api/ps`).",
+
+  "nevermin.ollamaNumCtx.markdownDescription": "Context window Ollama (`num_ctx`).\n\nModel kecil sering default 4096 token; prompt Explain besar bisa melebihi itu (`exceed_context_size`). Naikkan ke `8192` atau `16384` jika RAM/VRAM cukup; turunkan jika Ollama kehabisan memori.",
+
+  "nevermin.maxAnalysisFiles.markdownDescription": "Batas maksimum file per run analisis (seluruh repo atau file tercentang di sidebar **Pilih File**).\n\nAnalisis membangun code graph, Structure, insights, dan diagram. Git History adalah scan `git` lokal terpisah."
+}

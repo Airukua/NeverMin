@@ -324,7 +324,15 @@ function isStrongBodyStart(value: string): boolean {
   return /^(berikut|dalam|kamu|anda|hal|saat|ketika|this|the|here|you|it)\b/i.test(value.trim());
 }
 
+/** Full section titles that must never be split (Git History / Insights prompts). */
+function isPreservedSectionHeading(rest: string): boolean {
+  return /^(what is alive(?:\s+vs\s+frozen)?|alive vs frozen|why the code looks like this|who to ask|hidden coupling|how to explore(?:\s+next)?|mana yang hidup(?:\s+vs\s+beku)?|kenapa kode(?:\s+ditulis\s+begini)?|siapa yang paham|coupling tersembunyi|cara eksplorasi(?:\s+berikutnya)?)\s*$/i.test(
+    rest.trim()
+  );
+}
+
 function splitShortTitleFromBody(rest: string): { title: string; body: string } | null {
+  if (isPreservedSectionHeading(rest)) return null;
   const words = rest.trim().split(/\s+/);
   if (words.length < 3) return null;
 

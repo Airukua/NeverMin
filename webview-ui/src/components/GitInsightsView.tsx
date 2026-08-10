@@ -15,7 +15,14 @@ import {
   LoaderCircle,
   Users,
   Workflow,
-  ExternalLink
+  ExternalLink,
+  ShieldCheck,
+  Lightbulb,
+  Rocket,
+  SlidersHorizontal,
+  RefreshCw,
+  ClipboardList,
+  Activity
 } from 'lucide-react';
 import type {
   GitCouplingInsight,
@@ -25,10 +32,18 @@ import type {
   LlmInsightsStatus
 } from '../types';
 import { tw } from '../i18n';
-import { renderMarkdownLite } from '../lib/markdownLite';
 import { postToExtension } from '../vscodeApi';
+import {
+  authorInitials,
+  bulletToWhyItem,
+  parseGitLlmNarrative,
+  stripMarkdownNoise,
+  type GitNarrativeWhyItem
+} from '../lib/parseGitLlmNarrative';
 
 const PREVIEW = 7;
+
+const WHY_ICONS = [Rocket, SlidersHorizontal, ShieldCheck, RefreshCw, ClipboardList, Lightbulb];
 
 function shortPath(filePath: string): string {
   const parts = filePath.replace(/\\/g, '/').split('/').filter(Boolean);
@@ -38,6 +53,479 @@ function shortPath(filePath: string): string {
 
 function shortHash(hash: string): string {
   return hash.length > 7 ? hash.slice(0, 7) : hash;
+}
+
+function PathChip({
+  path,
+  onOpen
+}: {
+  path: string;
+  onOpen?: (path: string) => void;
+}) {
+  const label = shortPath(path);
+  if (onOpen) {
+    return (
+      <button
+        type="button"
+        onClick={() => onOpen(path)}
+        className="inline-flex max-w-full items-center rounded-md bg-[#93c5fd]/15 px-1.5 py-0.5 font-mono text-[10px] text-[#93c5fd] transition hover:bg-[#93c5fd]/25"
+        title={path}
+      >
+        <span className="truncate">{label}</span>
+      </button>
+    );
+  }
+  return (
+    <span
+      className="inline-flex max-w-full items-center rounded-md bg-[#93c5fd]/15 px-1.5 py-0.5 font-mono text-[10px] text-[#93c5fd]"
+      title={path}
+    >
+      <span className="truncate">{label}</span>
+    </span>
+  );
+}
+
+function TextWithPathChips({
+  text,
+  paths,
+  onOpen,
+  className
+}: {
+  text: string;
+  paths: string[];
+  onOpen?: (path: string) => void;
+  className?: string;
+}) {
+  if (!text) return null;
+  let remaining = stripMarkdownNoise(text);
+  const parts: Array<{ type: 'text' | 'path'; value: string }> = [];
+  const ordered = [...paths].sort((a, b) => b.length - a.length);
+  for (const p of ordered) {
+    const idx = remaining.indexOf(p);
+    if (idx < 0) continue;
+    if (idx > 0) parts.push({ type: 'text', value: remaining.slice(0, idx) });
+    parts.push({ type: 'path', value: p });
+    remaining = remaining.slice(idx + p.length);
+  }
+  if (remaining) parts.push({ type: 'text', value: remaining });
+  const cls = className ?? 'text-[13px] leading-relaxed text-[var(--text-hi)]';
+  if (parts.length === 0) {
+    return <p className={cls}>{stripMarkdownNoise(text)}</p>;
+  }
+  return (
+    <p className={cls}>
+      {parts.map((part, i) =>
+        part.type === 'path' ? (
+          <span key={`${part.value}-${i}`} className="mx-0.5 inline-block align-middle">
+            <PathChip path={part.value} onOpen={onOpen} />
+          </span>
+        ) : (
+          <span key={`t-${i}`}>{part.value}</span>
+        )
+      )}
+    </p>
+  );
+}
+
+function ActivityPulseCard({
+  level,
+  hint
+}: {
+  level: 'High' | 'Medium' | 'Low';
+  hint: string;
+}) {
+  const color = level === 'High' ? '#4ade80' : level === 'Medium' ? '#fbbf24' : '#94a3b8';
+  return (
+    <div className="flex w-full shrink-0 flex-col justify-between rounded-xl border border-white/10 bg-[#0b1220] p-3 sm:w-[180px]">
+      <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-lo)]">
+        <Activity size={12} style={{ color }} />
+        Activity
+      </div>
+      <svg viewBox="0 0 120 36" className="my-2 h-9 w-full" aria-hidden>
+        <polyline
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          points={
+            level === 'High'
+              ? '0,28 15,22 30,24 45,12 60,16 75,6 90,10 105,4 120,8'
+              : level === 'Medium'
+                ? '0,24 20,20 40,22 60,14 80,18 100,12 120,16'
+                : '0,22 30,20 60,21 90,19 120,20'
+          }
+        />
+      </svg>
+      <div>
+        <div className="text-[12px] font-semibold text-white">
+          {tw('git.ui.activityLevel')}: <span style={{ color }}>{level}</span>
+        </div>
+        <div className="mt-0.5 text-[10px] leading-snug text-[var(--text-lo)]">{hint}</div>
+      </div>
+    </div>
+  );
+}
+
+function WhyCard({
+  item,
+  index,
+  onOpen
+}: {
+  item: GitNarrativeWhyItem;
+  index: number;
+  onOpen: (path: string) => void;
+}) {
+  const Icon = WHY_ICONS[index % WHY_ICONS.length];
+  const detail = item.detail && item.detail !== item.title ? item.detail : '';
+  return (
+    <article className="rounded-xl border border-white/10 bg-white/[0.03] p-3.5">
+      <div className="flex items-start gap-2.5">
+        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#a78bfa]/30 bg-[#a78bfa]/10 text-[#c4b5fd]">
+          <Icon size={15} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h4 className="break-words text-[12px] font-semibold leading-snug text-white">
+            {item.title}
+          </h4>
+          {detail ? (
+            <div className="mt-1">
+              <TextWithPathChips
+                text={detail}
+                paths={item.paths}
+                onOpen={onOpen}
+                className="text-[11px] leading-relaxed text-[var(--text-lo)]"
+              />
+            </div>
+          ) : null}
+          {!detail && item.paths.length > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {item.paths.map((p) => (
+                <PathChip key={p} path={p} onOpen={onOpen} />
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function WhoCard({
+  name,
+  detail,
+  paths,
+  primary,
+  onOpen
+}: {
+  name: string;
+  detail: string;
+  paths: Array<{ path: string; share?: number }>;
+  primary?: boolean;
+  onOpen: (path: string) => void;
+}) {
+  return (
+    <article className="flex flex-col rounded-xl border border-white/10 bg-white/[0.03] p-3.5">
+      <div className="flex items-start gap-2.5">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#a78bfa]/35 bg-[#a78bfa]/15 text-[11px] font-bold text-[#c4b5fd]">
+          {authorInitials(name)}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <h4 className="truncate text-[12px] font-semibold text-white">{name}</h4>
+            {primary ? (
+              <span className="rounded-full bg-[#a78bfa]/20 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#c4b5fd]">
+                {tw('git.ui.primaryOwner')}
+              </span>
+            ) : null}
+          </div>
+          {detail ? (
+            <p className="mt-1 text-[11px] leading-snug text-[var(--text-lo)]">{detail}</p>
+          ) : null}
+        </div>
+      </div>
+      {paths.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-1">
+          {paths.slice(0, 4).map((p) => (
+            <button
+              key={p.path}
+              type="button"
+              onClick={() => onOpen(p.path)}
+              className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-white/[0.04] px-1.5 py-0.5 font-mono text-[10px] text-[var(--text-hi)] transition hover:bg-white/[0.07]"
+            >
+              <span className="max-w-[140px] truncate">{shortPath(p.path)}</span>
+              {typeof p.share === 'number' ? (
+                <span className="text-[#c4b5fd]">{Math.round(p.share * 100)}%</span>
+              ) : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function LlmSkeleton() {
+  return (
+    <div className="space-y-5" aria-hidden>
+      <div className="grid gap-3 md:grid-cols-[1fr_180px]">
+        <div className="space-y-2">
+          <div className="h-3 w-40 animate-pulse rounded bg-white/10" />
+          <div className="h-3 w-full animate-pulse rounded bg-white/[0.06]" />
+          <div className="h-3 w-5/6 animate-pulse rounded bg-white/[0.06]" />
+        </div>
+        <div className="h-24 animate-pulse rounded-xl bg-white/[0.06]" />
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {[1, 2, 3, 4].map((i) => (
+          <div key={i} className="h-24 animate-pulse rounded-xl bg-white/[0.06]" />
+        ))}
+      </div>
+      <div className="grid gap-2 sm:grid-cols-3">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="h-28 animate-pulse rounded-xl bg-white/[0.06]" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function aggregateOwners(owners: GitOwnerInsight[]) {
+  const byAuthor = new Map<
+    string,
+    { name: string; commits: number; paths: Array<{ path: string; share: number }> }
+  >();
+  for (const o of owners) {
+    const cur = byAuthor.get(o.author) ?? { name: o.author, commits: 0, paths: [] };
+    cur.commits += o.commits;
+    cur.paths.push({ path: o.path, share: o.share });
+    byAuthor.set(o.author, cur);
+  }
+  return [...byAuthor.values()]
+    .map((a) => ({
+      ...a,
+      paths: a.paths.sort((x, y) => y.share - x.share).slice(0, 4)
+    }))
+    .sort((a, b) => b.commits - a.commits)
+    .slice(0, 3);
+}
+
+function GitLlmInsightsPanel({
+  gitHistory,
+  gitLlmStatus,
+  gitLlmMessage,
+  onOpenFile
+}: {
+  gitHistory: GitHistoryInsights;
+  gitLlmStatus: LlmInsightsStatus;
+  gitLlmMessage?: string;
+  onOpenFile: (relativePath: string) => void;
+}) {
+  const inspecting = gitLlmStatus === 'inspecting';
+  const structuralMode = gitLlmStatus === 'error' || gitLlmStatus === 'skipped';
+  const narrative = gitHistory.narrative?.trim() ?? '';
+  const parsed = useMemo(() => parseGitLlmNarrative(narrative), [narrative]);
+  const bullets = gitHistory.summaryBullets ?? [];
+  const ownerCards = useMemo(() => aggregateOwners(gitHistory.owners ?? []), [gitHistory.owners]);
+
+  const aliveCount = gitHistory.aliveFiles?.length ?? 0;
+  const frozenCount = gitHistory.frozenFiles?.length ?? 0;
+  const activityLevel: 'High' | 'Medium' | 'Low' =
+    aliveCount >= 5 || gitHistory.commitCountSampled >= 80
+      ? 'High'
+      : aliveCount >= 2 || gitHistory.commitCountSampled >= 30
+        ? 'Medium'
+        : 'Low';
+
+  const activityHint =
+    frozenCount === 0
+      ? tw('git.ui.activityNoFrozen')
+      : tw('git.ui.activityMix', { alive: aliveCount, frozen: frozenCount });
+
+  const whyItems =
+    parsed.whyItems.length > 0
+      ? parsed.whyItems
+      : bullets.slice(0, 5).map((b) => bulletToWhyItem(b));
+
+  const whoFromNarrative = parsed.whoItems;
+  const whoCards =
+    whoFromNarrative.length > 0
+      ? whoFromNarrative.map((w, i) => ({
+          name: w.name,
+          detail: w.detail,
+          paths: w.paths.map((p) => ({ path: p })),
+          primary: i === 0
+        }))
+      : ownerCards.map((o, i) => ({
+          name: o.name,
+          detail: tw('git.ui.ownerFocusFallback'),
+          paths: o.paths,
+          primary: i === 0
+        }));
+
+  const hasRichContent =
+    Boolean(parsed.aliveSummary) || whyItems.length > 0 || whoCards.length > 0 || Boolean(narrative);
+
+  return (
+    <section
+      className="overflow-hidden rounded-2xl border border-[#a78bfa]/25 bg-[color-mix(in_srgb,var(--panel)_92%,#1e1b4b)] shadow-[0_0_0_1px_rgba(167,139,250,0.06)]"
+      aria-busy={inspecting}
+    >
+      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-white/5 px-4 py-4 md:px-5">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl border border-[#a78bfa]/35 bg-[#a78bfa]/15 text-[#c4b5fd]">
+            {inspecting ? (
+              <LoaderCircle className="animate-spin" size={18} strokeWidth={2} />
+            ) : structuralMode && !narrative ? (
+              <Workflow size={18} strokeWidth={2} />
+            ) : (
+              <Sparkles size={18} strokeWidth={2} />
+            )}
+          </span>
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-white">{tw('git.ui.llmTitle')}</h3>
+            <p className="mt-0.5 text-[11px] leading-snug text-[var(--text-lo)]">
+              {inspecting
+                ? gitLlmMessage || tw('git.ui.llmInspecting')
+                : structuralMode && !narrative
+                  ? tw('git.ui.llmStructural')
+                  : narrative
+                    ? tw('git.ui.llmSubtitle')
+                    : tw('git.ui.llmWaiting')}
+            </p>
+          </div>
+        </div>
+        {narrative && !inspecting ? (
+          <button
+            type="button"
+            onClick={() => postToExtension({ type: 'openGitNarrative' })}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[#a78bfa]/30 bg-[#a78bfa]/10 px-2.5 py-1.5 text-[11px] font-medium text-[#c4b5fd] transition hover:bg-[#a78bfa]/20"
+          >
+            {tw('git.ui.openNarrative')}
+            <ExternalLink size={12} />
+          </button>
+        ) : null}
+      </header>
+
+      <div className="space-y-6 px-4 py-5 md:px-5">
+        {inspecting ? (
+          <LlmSkeleton />
+        ) : !hasRichContent ? (
+          <p className="text-[12px] text-[var(--text-lo)]">{tw('git.ui.llmNone')}</p>
+        ) : (
+          <>
+            <div>
+              <div className="mb-2.5 flex items-center gap-2 text-[#c4b5fd]">
+                <ShieldCheck size={15} />
+                <h4 className="text-[12px] font-semibold tracking-wide">
+                  {tw('git.ui.sectionAlive')}
+                </h4>
+              </div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
+                <div className="min-w-0 flex-1 rounded-xl border border-white/10 bg-white/[0.03] p-3.5">
+                  {parsed.aliveSummary ? (
+                    <TextWithPathChips
+                      text={parsed.aliveSummary}
+                      paths={
+                        parsed.alivePaths.length
+                          ? parsed.alivePaths
+                          : (gitHistory.aliveFiles ?? []).slice(0, 4).map((f) => f.path)
+                      }
+                      onOpen={onOpenFile}
+                    />
+                  ) : (
+                    <p className="text-[13px] leading-relaxed text-[var(--text-hi)]">
+                      {tw('git.ui.aliveFallback', {
+                        alive: aliveCount,
+                        frozen: frozenCount
+                      })}
+                    </p>
+                  )}
+                  {parsed.frozenSummary ? (
+                    <div className="mt-3 border-t border-white/5 pt-3">
+                      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-lo)]">
+                        Frozen
+                      </div>
+                      <TextWithPathChips
+                        text={parsed.frozenSummary}
+                        paths={
+                          parsed.frozenPaths.length
+                            ? parsed.frozenPaths
+                            : (gitHistory.frozenFiles ?? []).slice(0, 4).map((f) => f.path)
+                        }
+                        onOpen={onOpenFile}
+                      />
+                    </div>
+                  ) : null}
+                  {(gitHistory.aliveFiles?.length ?? 0) > 0 ? (
+                    <div className="mt-3 flex flex-wrap gap-1">
+                      {gitHistory.aliveFiles.slice(0, 5).map((f) => (
+                        <PathChip key={f.path} path={f.path} onOpen={onOpenFile} />
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <ActivityPulseCard level={activityLevel} hint={activityHint} />
+              </div>
+            </div>
+
+            {whyItems.length > 0 ? (
+              <div>
+                <div className="mb-2.5 flex items-center gap-2 text-[#c4b5fd]">
+                  <Lightbulb size={15} />
+                  <h4 className="text-[12px] font-semibold tracking-wide">
+                    {tw('git.ui.sectionWhy')}
+                  </h4>
+                </div>
+                <div className="grid gap-2.5 sm:grid-cols-2">
+                  {whyItems.map((item, i) => (
+                    <WhyCard key={`${item.title}-${i}`} item={item} index={i} onOpen={onOpenFile} />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {whoCards.length > 0 ? (
+              <div>
+                <div className="mb-2.5 flex items-center gap-2 text-[#c4b5fd]">
+                  <Users size={15} />
+                  <h4 className="text-[12px] font-semibold tracking-wide">
+                    {tw('git.ui.sectionWho')}
+                  </h4>
+                </div>
+                <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+                  {whoCards.map((card) => (
+                    <WhoCard
+                      key={card.name}
+                      name={card.name}
+                      detail={card.detail}
+                      paths={card.paths}
+                      primary={card.primary}
+                      onOpen={onOpenFile}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {parsed.couplingSummary ? (
+              <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3.5">
+                <div className="mb-1.5 flex items-center gap-2 text-[#fdba74]">
+                  <Link2 size={14} />
+                  <span className="text-[11px] font-semibold uppercase tracking-wide">
+                    {tw('git.ui.sectionCoupling')}
+                  </span>
+                </div>
+                <p className="text-[12px] leading-relaxed text-[var(--text-hi)]">
+                  {parsed.couplingSummary}
+                </p>
+              </div>
+            ) : null}
+          </>
+        )}
+      </div>
+    </section>
+  );
 }
 
 function SummaryCard({
@@ -159,109 +647,6 @@ function ColumnCard({
           </button>
         </footer>
       ) : null}
-    </section>
-  );
-}
-
-function LlmSkeleton() {
-  return (
-    <div className="space-y-3" aria-hidden>
-      {[92, 78, 86, 64].map((w, i) => (
-        <div key={i} className="space-y-2">
-          <div className="h-3 w-28 animate-pulse rounded bg-white/10" />
-          <div
-            className="h-3 animate-pulse rounded bg-white/[0.06]"
-            style={{ width: `${w}%` }}
-          />
-          <div className="h-3 w-4/5 animate-pulse rounded bg-white/[0.06]" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function GitLlmInsightsPanel({
-  gitHistory,
-  gitLlmStatus,
-  gitLlmMessage
-}: {
-  gitHistory: GitHistoryInsights;
-  gitLlmStatus: LlmInsightsStatus;
-  gitLlmMessage?: string;
-}) {
-  const inspecting = gitLlmStatus === 'inspecting';
-  const structuralMode = gitLlmStatus === 'error' || gitLlmStatus === 'skipped';
-  const narrative = gitHistory.narrative?.trim() ?? '';
-  const narrativeHtml = useMemo(
-    () => (narrative ? renderMarkdownLite(narrative) : ''),
-    [narrative]
-  );
-  const bullets = gitHistory.summaryBullets ?? [];
-
-  return (
-    <section
-      className="overflow-hidden rounded-2xl border border-white/10 bg-[var(--panel)]"
-      aria-busy={inspecting}
-    >
-      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-white/5 px-4 py-3.5 md:px-5">
-        <div className="flex min-w-0 items-start gap-3">
-          <span className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-[#fdba74]">
-            {inspecting ? (
-              <LoaderCircle className="animate-spin" size={18} strokeWidth={2} />
-            ) : structuralMode && !narrative ? (
-              <Workflow size={18} strokeWidth={2} />
-            ) : (
-              <Sparkles size={18} strokeWidth={2} />
-            )}
-          </span>
-          <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-white">{tw('git.ui.llmTitle')}</h3>
-            <p className="mt-0.5 text-[11px] leading-snug text-[var(--text-lo)]">
-              {inspecting
-                ? gitLlmMessage || tw('git.ui.llmInspecting')
-                : structuralMode && !narrative
-                  ? tw('git.ui.llmStructural')
-                  : narrative
-                    ? tw('git.ui.llmSubtitle')
-                    : tw('git.ui.llmWaiting')}
-            </p>
-          </div>
-        </div>
-        {narrative && !inspecting ? (
-          <button
-            type="button"
-            onClick={() => postToExtension({ type: 'openGitNarrative' })}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-white/10 px-2.5 py-1.5 text-[11px] font-medium text-[#fdba74] transition hover:bg-white/[0.04]"
-          >
-            {tw('git.ui.openNarrative')}
-            <ExternalLink size={12} />
-          </button>
-        ) : null}
-      </header>
-
-      <div className="px-4 py-4 md:px-5">
-        {inspecting ? (
-          <LlmSkeleton />
-        ) : narrativeHtml ? (
-          <div className="nm-md" dangerouslySetInnerHTML={{ __html: narrativeHtml }} />
-        ) : bullets.length > 0 ? (
-          <div>
-            <p className="mb-3 text-[11px] text-[var(--text-lo)]">{tw('git.ui.llmStructuralHint')}</p>
-            <ul className="space-y-2">
-              {bullets.map((bullet) => (
-                <li
-                  key={bullet}
-                  className="rounded-xl border border-white/5 bg-white/[0.03] px-3 py-2 text-[12px] leading-relaxed text-[var(--text-hi)]"
-                >
-                  {bullet}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : (
-          <p className="text-[12px] text-[var(--text-lo)]">{tw('git.ui.llmNone')}</p>
-        )}
-      </div>
     </section>
   );
 }
@@ -496,6 +881,7 @@ export function GitInsightsView({
           gitHistory={gitHistory}
           gitLlmStatus={gitLlmStatus}
           gitLlmMessage={gitLlmMessage}
+          onOpenFile={openFile}
         />
 
         <div className="grid gap-4 lg:grid-cols-3">

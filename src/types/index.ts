@@ -62,9 +62,24 @@ export interface LlmCompleteOptions {
    * Diabaikan provider non-Ollama.
    */
   think?: boolean | 'low' | 'medium' | 'high' | 'max';
+  /** Abort in-flight stream/complete. */
+  signal?: AbortSignal;
 }
+
+export type LlmStreamHandlers = {
+  onToken: (chunk: string) => void;
+};
 
 export interface LlmProvider {
   readonly name: ProviderName;
   complete(prompt: string, options?: LlmCompleteOptions): Promise<LlmCompletionResult>;
+  /**
+   * Optional streaming. Providers tanpa stream boleh omit —
+   * callers should fall back to `complete`.
+   */
+  completeStream?(
+    prompt: string,
+    handlers: LlmStreamHandlers,
+    options?: LlmCompleteOptions
+  ): Promise<LlmCompletionResult>;
 }

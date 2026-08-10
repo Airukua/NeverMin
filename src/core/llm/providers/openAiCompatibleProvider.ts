@@ -5,6 +5,7 @@ import { getCachedPromptResponse, setCachedPromptResponse } from '../promptCache
 import { LlmProviderOptions } from '../llmOptions';
 import { normalizeOpenAiTokenUsage } from '../tokenUsage';
 import { ollamaNativeBaseUrl } from '../../../utils/ollamaModels';
+import { getOllamaNumCtx } from '../../../utils/config';
 
 interface OpenAiChatMessage {
   content?: string | Array<{ type?: string; text?: string }>;
@@ -227,7 +228,9 @@ export class OpenAiCompatibleProvider implements LlmProvider {
       messages: [{ role: 'user', content: prompt }],
       stream: false,
       options: {
-        temperature: this.temperature
+        temperature: this.temperature,
+        // Banyak model Ollama default num_ctx=4096; prompt Explain file mudah >6k token.
+        num_ctx: getOllamaNumCtx()
       }
     };
     if (options.think !== undefined) {
@@ -262,6 +265,247 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     const completionTokens = data.eval_count;
     return {
       text: parts.text,
+      thinking: parts.thinking,
+      usage:
+        promptTokens !== undefined || completionTokens !== undefined
+          ? {
+              promptTokens,
+              completionTokens,
+              totalTokens:
+                promptTokens !== undefined && completionTokens !== undefined
+                  ? promptTokens + completionTokens
+                  : undefined
+            }
+          : undefined
+    };
+  }
+
+  async completeStream(
+    prompt: string,
+    handlers: { onToken: (chunk: string) => void },
+    options: LlmCompleteOptions = {}
+  ): Promise<LlmCompletionResult> {
+    const skipCache = Boolean(options.skipCache);
+    if (!skipCache) {
+      const cached = getCachedPromptResponse(prompt, { namespace: this.name });
+      if (cached !== undefined) {
+        if (cached.response) handlers.onToken(cached.response);
+        return {
+          text: cached.response,
+          thinking: cached.thinking,
+          usage: cached.usage,
+          fromCache: true
+        };
+      }
+    }
+
+    if (!this.allowEmptyApiKey && !this.apiKey.trim()) {
+      throw new Error(`API key ${this.label} belum diset.`);
+    }
+    if (typeof globalThis.fetch !== 'function') {
+      throw new Error('Global fetch is not available in this environment.');
+    }
+
+    await this.rateLimiter.acquire();
+
+    const isOllama = this.name === 'ollama';
+    const timeoutMs = isOllama ? 180_000 : 90_000;
+    const controller = new AbortController();
+    const outer = options.signal;
+    const onAbort = () => controller.abort();
+    if (outer) {
+      if (outer.aborted) controller.abort();
+      else outer.addEventListener('abort', onAbort, { once: true });
+    }
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const result = isOllama
+        ? await this.streamOllamaNative(prompt, handlers, options, controller.signal)
+        : await this.streamOpenAiCompat(prompt, handlers, controller.signal);
+
+      if (options.cacheResponse !== false) {
+        setCachedPromptResponse(prompt, result.text, {
+          namespace: this.name,
+          usage: result.usage,
+          thinking: result.thinking
+        });
+      }
+      return result;
+    } finally {
+      clearTimeout(timeout);
+      if (outer) outer.removeEventListener('abort', onAbort);
+    }
+  }
+
+  private async streamOpenAiCompat(
+    prompt: string,
+    handlers: { onToken: (chunk: string) => void },
+    signal: AbortSignal
+  ): Promise<LlmCompletionResult> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...this.extraHeaders
+    };
+    if (this.apiKey.trim()) {
+      headers.Authorization = `Bearer ${this.apiKey.trim()}`;
+    }
+
+    const res = await globalThis.fetch(this.endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model: this.model,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: this.temperature,
+        stream: true
+      }),
+      signal
+    });
+
+    if (!res.ok) {
+      const errBody = await res.text();
+      const detail = errBody.replace(/\s+/g, ' ').trim().slice(0, 280);
+      throw new HttpStatusError(
+        detail
+          ? `${this.label} API error: ${res.status} · ${detail}`
+          : `${this.label} API error: ${res.status}`,
+        res.status,
+        errBody
+      );
+    }
+
+    if (!res.body) {
+      throw new Error(`${this.label} stream: empty body`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    let text = '';
+    let usage: LlmCompletionResult['usage'];
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const payload = trimmed.slice(5).trim();
+        if (!payload || payload === '[DONE]') continue;
+        try {
+          const json = JSON.parse(payload) as {
+            choices?: Array<{ delta?: { content?: string } }>;
+            usage?: unknown;
+          };
+          const piece = json.choices?.[0]?.delta?.content;
+          if (typeof piece === 'string' && piece.length > 0) {
+            text += piece;
+            handlers.onToken(piece);
+          }
+          if (json.usage) {
+            usage = normalizeOpenAiTokenUsage(json.usage);
+          }
+        } catch {
+          /* ignore partial JSON */
+        }
+      }
+    }
+
+    const parts = extractOpenAiMessageParts({ content: text });
+    return { text: parts.text || text, thinking: parts.thinking, usage };
+  }
+
+  private async streamOllamaNative(
+    prompt: string,
+    handlers: { onToken: (chunk: string) => void },
+    options: LlmCompleteOptions,
+    signal: AbortSignal
+  ): Promise<LlmCompletionResult> {
+    const native = ollamaNativeBaseUrl(this.openAiBaseUrl);
+    const body: Record<string, unknown> = {
+      model: this.model,
+      messages: [{ role: 'user', content: prompt }],
+      stream: true,
+      options: {
+        temperature: this.temperature,
+        num_ctx: getOllamaNumCtx()
+      }
+    };
+    // JSON gap explain: matikan thinking agar output tetap parseable.
+    body.think = options.think === undefined ? false : options.think;
+
+    const res = await globalThis.fetch(`${native}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal
+    });
+
+    if (!res.ok) {
+      const errBody = await res.text();
+      const detail = errBody.replace(/\s+/g, ' ').trim().slice(0, 280);
+      throw new HttpStatusError(
+        detail
+          ? `${this.label} API error: ${res.status} · ${detail}`
+          : `${this.label} API error: ${res.status}`,
+        res.status,
+        errBody
+      );
+    }
+    if (!res.body) {
+      throw new Error(`${this.label} stream: empty body`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    let text = '';
+    let thinking = '';
+    let promptTokens: number | undefined;
+    let completionTokens: number | undefined;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const json = JSON.parse(trimmed) as {
+            message?: { content?: string; thinking?: string };
+            prompt_eval_count?: number;
+            eval_count?: number;
+            done?: boolean;
+          };
+          const piece = json.message?.content;
+          if (typeof piece === 'string' && piece.length > 0) {
+            text += piece;
+            handlers.onToken(piece);
+          }
+          if (typeof json.message?.thinking === 'string' && json.message.thinking) {
+            thinking += json.message.thinking;
+          }
+          if (json.prompt_eval_count !== undefined) promptTokens = json.prompt_eval_count;
+          if (json.eval_count !== undefined) completionTokens = json.eval_count;
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
+    const parts = extractOpenAiMessageParts({
+      content: text,
+      thinking: thinking || undefined
+    });
+    return {
+      text: parts.text || text,
       thinking: parts.thinking,
       usage:
         promptTokens !== undefined || completionTokens !== undefined

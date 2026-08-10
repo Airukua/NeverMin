@@ -8,6 +8,8 @@ import {
 } from './nodeCardIcons';
 import { t } from '../../i18n';
 import { getLanguage } from '../../utils/config';
+import type { SensitivityLevel } from './sensitivity';
+import { listSensitivityItems, lookupSensitivity } from './sensitivity';
 
 export type { NodeCardIcon } from './nodeCardIcons';
 export { inferNodeIcon, isNodeCardIcon, NODE_CARD_ICONS } from './nodeCardIcons';
@@ -17,7 +19,7 @@ const MAX_HUB = 5;
 const MAX_SUPPORT = 6;
 const MAX_MODULE_FOLDERS = 10;
 
-export type MermaidGraphView = 'architecture' | 'modules' | 'flow' | 'functions' | 'git';
+export type MermaidGraphView = 'architecture' | 'modules' | 'flow' | 'functions' | 'sensitive' | 'compass' | 'git';
 
 export interface MermaidNodeMeta {
   id: string;
@@ -29,6 +31,8 @@ export interface MermaidNodeMeta {
   endLine: number;
   summary?: string;
   expandKey?: string;
+  sensitivityLevel?: SensitivityLevel;
+  sensitivityReason?: string;
 }
 
 export type GraphCardRole = 'entry' | 'hub' | 'pipeline' | 'support';
@@ -41,6 +45,8 @@ export interface GraphViewNode {
   role: GraphCardRole;
   summary?: string;
   iconKey?: string;
+  sensitivityLevel?: SensitivityLevel;
+  sensitivityReason?: string;
   startLine: number;
   endLine: number;
   row: number;
@@ -63,6 +69,8 @@ export interface GraphViewSection {
   label: string;
   hint?: string;
   role?: GraphCardRole;
+  /** Warna aksen section (mis. level sensitivitas). */
+  accent?: string;
 }
 
 export interface GraphViewModel {
@@ -86,6 +94,8 @@ export interface RepoMermaidBundle {
     flow: GraphViewModel;
     /** Overview file tertutup — klik kartu untuk buka isi fungsi. */
     functions: GraphViewModel;
+    /** Kode sensitif — dikelompokkan critical / high / medium. */
+    sensitive: GraphViewModel;
   };
   /** Detail fungsi per file (key = normalized file path). */
   functionGroups: Record<string, GraphViewModel>;
@@ -1030,7 +1040,8 @@ export function emptyGraphViews(message = 'No graph'): RepoMermaidBundle['views'
     architecture: empty,
     modules: empty,
     flow: empty,
-    functions: empty
+    functions: empty,
+    sensitive: empty
   };
 }
 
@@ -1041,8 +1052,10 @@ function cardFromRef(
   row: number,
   col: number,
   summaries?: Record<string, string>,
-  icons?: Record<string, string>
+  icons?: Record<string, string>,
+  sensitivityMap?: GraphInsights['nodeSensitivity']
 ): GraphViewNode {
+  const sensitivity = lookupSensitivity(sensitivityMap, ref);
   return {
     id,
     name: ref.name,
@@ -1051,6 +1064,8 @@ function cardFromRef(
     role,
     summary: lookupSummary(summaries, ref),
     iconKey: lookupIcon(icons, ref) || inferNodeIcon(ref.name, { kind: ref.kind, filePath: ref.filePath }),
+    sensitivityLevel: sensitivity?.level,
+    sensitivityReason: sensitivity?.reason,
     startLine: ref.startLine,
     endLine: ref.endLine,
     row,
@@ -1188,6 +1203,91 @@ function buildFlowView(
     edges.push({ id: `${ids[i]}->${ids[i + 1]}`, source: ids[i], target: ids[i + 1] });
   }
   return { nodes, edges };
+}
+
+const SENSITIVITY_ACCENT: Record<Exclude<SensitivityLevel, 'low'>, string> = {
+  critical: '#f87171',
+  high: '#fb923c',
+  medium: '#fbbf24'
+};
+
+function sensitivityRole(level: SensitivityLevel): GraphCardRole {
+  if (level === 'critical') return 'entry';
+  if (level === 'high') return 'hub';
+  if (level === 'medium') return 'pipeline';
+  return 'support';
+}
+
+/** Tab Sensitive code: kartu per file/simbol, dikelompokkan critical → high → medium. */
+function buildSensitiveView(
+  graph: CodeGraph,
+  insights?: GraphInsights | null,
+  icons?: Record<string, string>
+): GraphViewModel {
+  if (!insights?.nodeSensitivity) {
+    return emptyView(t('graph.sensitive.empty'));
+  }
+
+  const items = listSensitivityItems(insights, graph, 30);
+  if (items.length === 0) {
+    return emptyView(t('graph.sensitive.empty'));
+  }
+
+  const byLevel: Record<'critical' | 'high' | 'medium', typeof items> = {
+    critical: [],
+    high: [],
+    medium: []
+  };
+  for (const item of items) {
+    if (item.sensitivity.level === 'critical') byLevel.critical.push(item);
+    else if (item.sensitivity.level === 'high') byLevel.high.push(item);
+    else if (item.sensitivity.level === 'medium') byLevel.medium.push(item);
+  }
+
+  const nodes: GraphViewNode[] = [];
+  const sections: GraphViewSection[] = [];
+  const order: Array<'critical' | 'high' | 'medium'> = ['critical', 'high', 'medium'];
+  let row = 0;
+
+  for (const level of order) {
+    const group = byLevel[level].slice(0, 8);
+    if (group.length === 0) continue;
+    sections.push({
+      row,
+      label: t(`graph.sensitive.section.${level}`),
+      hint: t(`graph.sensitive.section.${level}Hint`),
+      role: sensitivityRole(level),
+      accent: SENSITIVITY_ACCENT[level]
+    });
+    group.forEach((item, col) => {
+      const isFile = item.kind === 'file' || item.kind === 'file-group';
+      const displayName = isFile ? fileBaseName(item.filePath || item.name) : item.name;
+      nodes.push({
+        id: `S-${level}-${col}-${item.id}`,
+        name: displayName,
+        filePath: item.filePath,
+        kind: isFile ? 'file' : item.kind,
+        role: sensitivityRole(level),
+        summary: item.sensitivity.reason,
+        iconKey:
+          lookupIcon(icons, item) ||
+          inferNodeIcon(item.name, { kind: item.kind, filePath: item.filePath }),
+        sensitivityLevel: item.sensitivity.level,
+        sensitivityReason: item.sensitivity.reason,
+        startLine: item.startLine,
+        endLine: item.endLine,
+        row,
+        col
+      });
+    });
+    row += 1;
+  }
+
+  if (nodes.length === 0) {
+    return emptyView(t('graph.sensitive.empty'));
+  }
+
+  return { nodes, edges: [], sections };
 }
 
 function buildModulesView(
@@ -1712,7 +1812,8 @@ export function buildRepoMermaidBundle(
     architecture: buildArchitectureView(insights, summaries, icons),
     modules: buildModulesView(graph, summaries, icons),
     flow: buildFlowView(insights, summaries, icons),
-    functions: buildFunctionsOverviewView(graph, icons)
+    functions: buildFunctionsOverviewView(graph, icons),
+    sensitive: buildSensitiveView(graph, insights, icons)
   };
   const functionGroups = buildAllFunctionGroups(graph, options.focusNodeId, summaries, icons);
 

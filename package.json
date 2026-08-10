@@ -206,7 +206,7 @@
     "viewsWelcome": [
       {
         "view": "nevermin.explorer",
-        "contents": "Start by choosing how NeverMIN may analyze this workspace.\n[Private codebase — local / Ollama](command:nevermin.setPrivacyPrivate)\n[Public codebase — cloud LLM OK](command:nevermin.setPrivacyPublic)\n\nThen open a folder and run analysis from the sidebar:\n[Open Folder](command:workbench.action.files.openFolder)\n\nTip: privacy, Structure (folder→file→function), and Git History are in the NeverMIN sidebar — not only in Settings."
+        "contents": "%nevermin.viewsWelcome%"
       }
     ],
     "viewsContainers": {
@@ -222,7 +222,7 @@
       "nevermin-sidebar": [
         {
           "id": "nevermin.explorer",
-          "name": "Onboarding"
+          "name": "%nevermin.view.explorer.name%"
         }
       ]
     },
@@ -232,16 +232,13 @@
         "nevermin.language": {
           "order": 1,
           "type": "string",
-          "enum": [
-            "id",
-            "en"
-          ],
+          "enum": ["id", "en"],
           "enumDescriptions": [
-            "Bahasa Indonesia (UI + jawaban LLM)",
-            "English (UI + LLM responses)"
+            "%nevermin.language.enum.id%",
+            "%nevermin.language.enum.en%"
           ],
           "default": "id",
-          "markdownDescription": "Bahasa UI sidebar/webview dan bahasa jawaban LLM.\n\nBisa juga diganti dari sidebar **Pengaturan**, atau command `NeverMIN: Pilih Bahasa`."
+          "markdownDescription": "%nevermin.language.markdownDescription%"
         },
         "nevermin.provider": {
           "order": 2,
@@ -259,25 +256,25 @@
             "xai"
           ],
           "enumDescriptions": [
-            "Ollama lokal (tanpa API key) — wajib di mode Private",
-            "Google Gemini (API key cloud)",
-            "OpenAI Chat Completions",
-            "Anthropic Claude Messages API",
-            "OpenRouter (banyak model, satu key)",
-            "DeepSeek Chat Completions",
-            "Groq (inference cepat)",
-            "Mistral AI",
-            "Together AI",
-            "xAI Grok"
+            "%nevermin.provider.enum.ollama%",
+            "%nevermin.provider.enum.gemini%",
+            "%nevermin.provider.enum.openai%",
+            "%nevermin.provider.enum.anthropic%",
+            "%nevermin.provider.enum.openrouter%",
+            "%nevermin.provider.enum.deepseek%",
+            "%nevermin.provider.enum.groq%",
+            "%nevermin.provider.enum.mistral%",
+            "%nevermin.provider.enum.together%",
+            "%nevermin.provider.enum.xai%"
           ],
           "default": "ollama",
-          "markdownDescription": "LLM provider aktif.\n\n**Mode privasi (sidebar, per workspace):**\n- **Private** → provider dikunci ke `ollama`, API key cloud dihapus.\n- **Public** → boleh cloud (Gemini/OpenAI/…). Jika masih Ollama setelah ganti ke Public, pilih provider cloud dulu lalu `NeverMIN: Simpan API Key`.\n\nGanti juga lewat sidebar **Pengaturan** → Provider."
+          "markdownDescription": "%nevermin.provider.markdownDescription%"
         },
         "nevermin.model": {
           "order": 3,
           "type": "string",
           "default": "",
-          "markdownDescription": "Override nama model LLM. Kosongkan = default provider (mis. Ollama `llama3.2`, Gemini `gemini-flash-latest`).\n\nUntuk Ollama, lebih mudah pakai `NeverMIN: Pilih Model Ollama` (deteksi model terpasang / loaded di RAM).\n\n**Penting:** model harus cocok dengan provider aktif. Sisa model Ollama/`gemini-2.5-flash` (sering 404) akan diganti ke default provider."
+          "markdownDescription": "%nevermin.model.markdownDescription%"
         },
         "nevermin.temperature": {
           "order": 4,
@@ -285,21 +282,29 @@
           "default": 0.2,
           "minimum": 0,
           "maximum": 2,
-          "markdownDescription": "Temperature sampling LLM (0 = lebih deterministik). Dipakai Explain Code, narasi insights, dan ringkas node."
+          "markdownDescription": "%nevermin.temperature.markdownDescription%"
         },
         "nevermin.ollamaBaseUrl": {
           "order": 5,
           "type": "string",
           "default": "http://127.0.0.1:11434/v1",
-          "markdownDescription": "Base URL OpenAI-compatible untuk **Ollama** (mode Private / provider `ollama`).\n\nDefault lokal: `http://127.0.0.1:11434/v1`. NeverMIN memotong `/v1` saat memanggil API native Ollama (`/api/tags`, `/api/ps`)."
+          "markdownDescription": "%nevermin.ollamaBaseUrl.markdownDescription%"
+        },
+        "nevermin.ollamaNumCtx": {
+          "order": 6,
+          "type": "number",
+          "default": 16384,
+          "minimum": 2048,
+          "maximum": 131072,
+          "markdownDescription": "%nevermin.ollamaNumCtx.markdownDescription%"
         },
         "nevermin.maxAnalysisFiles": {
-          "order": 6,
+          "order": 7,
           "type": "number",
           "default": 500,
           "minimum": 10,
           "maximum": 2000,
-          "markdownDescription": "Batas maksimum file per run analisis (full-repo atau file tercentang di sidebar **3. Pilih File**).\n\nAnalisis membangun code graph, Structure, insights, dan diagram. Git History memakai `git` lokal terpisah."
+          "markdownDescription": "%nevermin.maxAnalysisFiles.markdownDescription%"
         }
       }
     }

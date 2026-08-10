@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import path from 'path';
 import { buildRepoGraph } from '../core/graph/graphBuilder';
 import { buildGraphInsights } from '../core/graph/graphInsights';
+import { attachNodeSensitivity } from '../core/graph/sensitivity';
 import { analyzeRepoFiles, RepoFileSnapshot } from '../core/analysis/repoAnalyzer';
 import { buildGraphInsightsPrompt, buildNodeSummariesPrompt, parseNodeSummariesResponse, parseGraphInsightsLlmResponse, applyGraphInsightsLlmPayload } from '../core/llm/promptBuilder';
 import { createLlmProvider } from '../core/llm/llmClient';
@@ -43,7 +44,11 @@ import {
   pickPrimaryLlmIssue
 } from '../utils/llmUserNotice';
 import { prepareLlmSession, type LlmSession } from '../utils/llmSession';
-import { isIgnoredWorkspacePath, hasWorkspaceFolders } from '../utils/workspace';
+import {
+  getWorkspaceAnalysisFiles,
+  isIgnoredWorkspacePath,
+  hasWorkspaceFolders
+} from '../utils/workspace';
 import { setCachedCodeGraph } from '../utils/codeGraphCache';
 import { saveRepoAnalysis, setLastAnalysisMode, setRepoAnalysisStatus } from '../utils/repoAnalysis';
 import { getSelectedAnalysisFileUris } from '../utils/repoAnalysisSelection';
@@ -52,9 +57,38 @@ import { getLatestGitHistory } from '../utils/gitHistoryAnalysis';
 import { planLocalLlmRun } from '../utils/localLlmCapacity';
 import { normalizeMarkdownSource } from '../ui/webview/markdownLite';
 import { clearSymbolCache } from '../core/parser/symbolCache';
+import {
+  enrichContributionCompassWithLlm,
+  heuristicCompass
+} from './contributionCompassLlm';
+import type { ContributionCompassModel } from '../core/graph/contributionCompass';
+import type { GraphInsights } from '../core/graph/graphInsights';
+import type { CodeGraph } from '../core/graph/types';
+import type { GitHistoryInsights } from '../core/git/gitHistoryInsights';
 
 /** Batas aman agar analisis full-repo tidak OOM di workspace besar. */
 export const MAX_ANALYSIS_FILES = 500;
+
+function safeHeuristicCompass(
+  insights: GraphInsights,
+  gitHistory: GitHistoryInsights | null | undefined,
+  llmStatus: ContributionCompassModel['llmStatus'],
+  extras?: {
+    graph?: CodeGraph | null;
+    fileContents?: Array<{ path: string; content: string }>;
+  }
+): ContributionCompassModel | undefined {
+  try {
+    return heuristicCompass(insights, gitHistory ?? null, llmStatus, extras);
+  } catch (error) {
+    Logger.warn(
+      `Compass heuristic gagal (analisis lanjut tanpa gaps): ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+    return undefined;
+  }
+}
 
 export function limitAnalysisFiles<T>(files: readonly T[], max = MAX_ANALYSIS_FILES): {
   capped: T[];
@@ -78,11 +112,6 @@ export function gateAnalysisProgress(cancelled: boolean, snapshotCount: number):
   }
   return 'ready';
 }
-
-const WORKSPACE_CODE_GLOB =
-  '**/*.{ts,tsx,js,jsx,mjs,cjs,py,go,java,kt,kts,rs,rb,php,sh,c,cc,cpp,h,hpp,cs,swift,md,json,yml,yaml,toml,txt}';
-const WORKSPACE_IGNORE_GLOB =
-  '{**/node_modules/**,**/.git/**,**/dist/**,**/out/**,**/.vscode-test/**,**/build/**,**/coverage/**,**/vendor/**,**/.next/**,**/.nuxt/**,**/.svelte-kit/**,**/.cache/**,**/.turbo/**,**/tmp/**,**/temp/**}';
 
 async function readSnapshots(files: vscode.Uri[], token: vscode.CancellationToken): Promise<RepoFileSnapshot[]> {
   const snapshots: RepoFileSnapshot[] = [];
@@ -491,7 +520,12 @@ async function runAnalysisWorkflow(
         progress.report({ message: t('analyze.progressInsights'), increment: 40 });
         Logger.info(`Graph siap · ${graph.nodes.length} node · ${graph.edges.length} edge`);
         await setCachedCodeGraph(context, graph);
-        let insights = buildGraphInsights(graph, getLanguage());
+        let insights = attachNodeSensitivity(
+          buildGraphInsights(graph, getLanguage()),
+          graph,
+          getLatestGitHistory(context) ?? null,
+          getLanguage()
+        );
 
         // Tampilkan Mermaid SEGERA — jangan ditahan 2x call LLM (bisa stuck bermenit-menit)
         const baseAnalysis = {
@@ -506,6 +540,10 @@ async function runAnalysisWorkflow(
           message: graph.nodes.length > 0 ? undefined : t('analyze.emptyGraph'),
           insights,
           gitHistory: getLatestGitHistory(context) ?? null,
+          compass: safeHeuristicCompass(insights, getLatestGitHistory(context) ?? null, 'pending', {
+            graph,
+            fileContents: snapshots.map((s) => ({ path: s.filePath, content: s.content }))
+          }),
           llmStatus: 'inspecting',
           llmMessage:
             getLanguage() === 'en'
@@ -518,6 +556,16 @@ async function runAnalysisWorkflow(
         if (!prepared.ok) {
           Logger.warn(`LLM lewati · preflight · ${prepared.issue.detail || prepared.issue.kind}`);
           await setGraphPanelLlmStatus(graphPanel, 'skipped', prepared.issue.detail);
+          await updateGraphPanel(graphPanel, graph, {
+            insights,
+            gitHistory: getLatestGitHistory(context) ?? null,
+            compass: safeHeuristicCompass(insights, getLatestGitHistory(context) ?? null, 'skipped', {
+              graph,
+              fileContents: snapshots.map((s) => ({ path: s.filePath, content: s.content }))
+            }),
+            llmStatus: 'skipped',
+            llmMessage: prepared.issue.detail
+          });
           void notifyLlmIssue(prepared.issue);
         } else {
           progress.report({ message: t('analyze.progressLlm'), increment: 70 });
@@ -563,21 +611,41 @@ async function runAnalysisWorkflow(
                 })
               ]);
             }
+            insights = attachNodeSensitivity(
+              {
+                ...narrativeOutcome.insights,
+                nodeSummaries: {
+                  ...(narrativeOutcome.insights.nodeSummaries ?? {}),
+                  ...(summariesOutcome.insights.nodeSummaries ?? {})
+                },
+                nodeIcons: {
+                  ...(narrativeOutcome.insights.nodeIcons ?? {}),
+                  ...(summariesOutcome.insights.nodeIcons ?? {})
+                },
+                tokenUsage: addTokenUsage(
+                  narrativeOutcome.tokenUsage,
+                  summariesOutcome.tokenUsage
+                )
+              },
+              graph,
+              getLatestGitHistory(context) ?? null,
+              getLanguage()
+            );
+
+            const gitHistory = getLatestGitHistory(context) ?? null;
+            const compassOutcome = await enrichContributionCompassWithLlm({
+              insights,
+              graph,
+              gitHistory,
+              session,
+              candidateDocPaths: snapshots.map((s) => s.filePath),
+              fileContents: snapshots.map((s) => ({ path: s.filePath, content: s.content }))
+            });
             insights = {
-              ...narrativeOutcome.insights,
-              nodeSummaries: {
-                ...(narrativeOutcome.insights.nodeSummaries ?? {}),
-                ...(summariesOutcome.insights.nodeSummaries ?? {})
-              },
-              nodeIcons: {
-                ...(narrativeOutcome.insights.nodeIcons ?? {}),
-                ...(summariesOutcome.insights.nodeIcons ?? {})
-              },
-              tokenUsage: addTokenUsage(
-                narrativeOutcome.tokenUsage,
-                summariesOutcome.tokenUsage
-              )
+              ...insights,
+              tokenUsage: addTokenUsage(insights.tokenUsage, compassOutcome.tokenUsage)
             };
+
             const enrichedAnalysis = {
               ...analysisResult,
               insights
@@ -587,14 +655,17 @@ async function runAnalysisWorkflow(
               insights.narrative?.trim() || insights.panel?.purpose?.trim()
             );
             const summaryCount = Object.keys(insights.nodeSummaries ?? {}).length;
-            const issues = [narrativeOutcome.issue, summariesOutcome.issue].filter(
-              (item): item is LlmIssue => Boolean(item)
-            );
+            const issues = [
+              narrativeOutcome.issue,
+              summariesOutcome.issue,
+              compassOutcome.issue
+            ].filter((item): item is LlmIssue => Boolean(item));
 
             await updateGraphPanel(graphPanel, graph, {
               state: graph.nodes.length > 0 ? 'ready' : 'empty',
               insights,
-              gitHistory: getLatestGitHistory(context) ?? null,
+              gitHistory,
+              compass: compassOutcome.compass,
               llmStatus: narrativeOk ? 'ready' : 'error',
               llmMessage: narrativeOk
                 ? undefined
@@ -607,7 +678,7 @@ async function runAnalysisWorkflow(
             if (narrativeOk && summaryCount > 0) {
               const usageLog = formatTokenUsageForLog(insights.tokenUsage);
               Logger.info(
-                `LLM selesai · OK · narasi=${summarizeNarrativeResult(insights.narrative || '')} · summaries=${summaryCount}${
+                `LLM selesai · OK · narasi=${summarizeNarrativeResult(insights.narrative || '')} · summaries=${summaryCount} · compass=${compassOutcome.compass.llmStatus}${
                   usageLog ? ` · ${usageLog}` : ''
                 }`
               );
@@ -687,13 +758,13 @@ export function registerAnalyzeRepoCommand(context: vscode.ExtensionContext): vs
     }
 
     const maxFiles = getMaxAnalysisFiles();
-    const files = await vscode.workspace.findFiles(
-      WORKSPACE_CODE_GLOB,
-      WORKSPACE_IGNORE_GLOB,
-      maxFiles
-    );
+    // Satu jalur dengan sidebar file picker — jangan pakai glob terpisah (rawan nest-brace kosong).
+    const files = await getWorkspaceAnalysisFiles(maxFiles);
 
     if (files.length === 0) {
+      Logger.warn(
+        `analyzeRepo: 0 file (maxFiles=${maxFiles}, folders=${vscode.workspace.workspaceFolders?.length ?? 0})`
+      );
       vscode.window.showWarningMessage(t('analyze.noValidFiles'));
       return;
     }

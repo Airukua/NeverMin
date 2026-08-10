@@ -14,7 +14,12 @@ import {
   Waypoints,
   Workflow
 } from 'lucide-react';
-import type { InsightRef, LlmInsightsStatus, MainFlow, WebviewInsights } from '../types';
+import type {
+  InsightRef,
+  LlmInsightsStatus,
+  MainFlow,
+  WebviewInsights
+} from '../types';
 import {
   formatInsightInline,
   inferPrimaryLanguage,
@@ -480,7 +485,9 @@ export function InsightsPane({
             <InsightsSectionSkeletons />
           ) : !insights ? (
             <p className="text-xs text-[var(--text-lo)]">{tw('insights.none')}</p>
-          ) : hasLlmPanel && !structuralMode ? (
+          ) : (
+            <>
+              {hasLlmPanel && !structuralMode ? (
             <>
               {panel!.purpose ? (
                 <SectionCard
@@ -592,14 +599,16 @@ export function InsightsPane({
                 </SectionCard>
               )}
             </>
-          ) : (
-            <HeuristicFallback
-              insights={insights}
-              llmStatus={llmStatus}
-              llmMessage={llmMessage}
-              onSelectRef={onSelectRef}
-              onOpenMainFlow={onOpenMainFlow}
-            />
+              ) : (
+                <HeuristicFallback
+                  insights={insights}
+                  llmStatus={llmStatus}
+                  llmMessage={llmMessage}
+                  onSelectRef={onSelectRef}
+                  onOpenMainFlow={onOpenMainFlow}
+                />
+              )}
+            </>
           )}
         </div>
 

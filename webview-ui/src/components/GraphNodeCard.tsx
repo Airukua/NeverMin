@@ -1,5 +1,6 @@
 import { FileCode, Folder, getLucideIcon, inferNodeIcon } from '../lib/icons';
 import { tw } from '../i18n';
+import type { SensitivityLevel } from '../types';
 
 export type NodeRole = 'entry' | 'hub' | 'pipeline' | 'support';
 
@@ -37,12 +38,60 @@ const roleBadge: Record<NodeRole, string> = {
     'border-[color-mix(in_srgb,var(--role-support)_45%,transparent)] bg-[color-mix(in_srgb,var(--role-support)_12%,transparent)] text-[#94A3B8]'
 };
 
+/** Border / glow / accent untuk tab Sensitive code (bukan pill badge). */
+const sensitivityBorder: Record<SensitivityLevel, string> = {
+  critical: 'border-[#f87171]',
+  high: 'border-[#fb923c]',
+  medium: 'border-[#fbbf24]',
+  low: 'border-[#94a3b8]'
+};
+
+const sensitivityAccent: Record<SensitivityLevel, string> = {
+  critical: 'text-[#fca5a5]',
+  high: 'text-[#fdba74]',
+  medium: 'text-[#fcd34d]',
+  low: 'text-[#94a3b8]'
+};
+
+const sensitivityGlow: Record<SensitivityLevel, string> = {
+  critical:
+    'bg-[color-mix(in_srgb,#f87171_18%,transparent)] text-[#fca5a5] ring-1 ring-[color-mix(in_srgb,#f87171_45%,transparent)]',
+  high: 'bg-[color-mix(in_srgb,#fb923c_18%,transparent)] text-[#fdba74] ring-1 ring-[color-mix(in_srgb,#fb923c_45%,transparent)]',
+  medium:
+    'bg-[color-mix(in_srgb,#fbbf24_16%,transparent)] text-[#fcd34d] ring-1 ring-[color-mix(in_srgb,#fbbf24_40%,transparent)]',
+  low: 'bg-[color-mix(in_srgb,#94a3b8_14%,transparent)] text-[#94a3b8] ring-1 ring-[color-mix(in_srgb,#94a3b8_35%,transparent)]'
+};
+
+const sensitivityFolderBadge: Record<SensitivityLevel, string> = {
+  critical:
+    'border-[color-mix(in_srgb,#f87171_45%,transparent)] bg-[color-mix(in_srgb,#f87171_10%,transparent)] text-[#fca5a5]',
+  high: 'border-[color-mix(in_srgb,#fb923c_45%,transparent)] bg-[color-mix(in_srgb,#fb923c_10%,transparent)] text-[#fdba74]',
+  medium:
+    'border-[color-mix(in_srgb,#fbbf24_45%,transparent)] bg-[color-mix(in_srgb,#fbbf24_10%,transparent)] text-[#fcd34d]',
+  low: 'border-[color-mix(in_srgb,#94a3b8_40%,transparent)] bg-[color-mix(in_srgb,#94a3b8_10%,transparent)] text-[#94a3b8]'
+};
+
+const SENSITIVITY_HANDLE: Record<SensitivityLevel, string> = {
+  critical: '#f87171',
+  high: '#fb923c',
+  medium: '#fbbf24',
+  low: '#94a3b8'
+};
+
 export const ROLE_HANDLE_COLOR: Record<NodeRole, string> = {
   entry: 'var(--role-entry)',
   hub: 'var(--role-hub)',
   pipeline: 'var(--role-pipeline)',
   support: 'var(--role-support)'
 };
+
+export function handleColorForCard(
+  role: NodeRole,
+  sensitivityLevel?: SensitivityLevel
+): string {
+  if (sensitivityLevel) return SENSITIVITY_HANDLE[sensitivityLevel];
+  return ROLE_HANDLE_COLOR[role] ?? 'var(--role-entry)';
+}
 
 export interface GraphNodeCardProps {
   name: string;
@@ -54,6 +103,9 @@ export interface GraphNodeCardProps {
   selected?: boolean;
   /** LLM masih menulis summary node. */
   skeleton?: boolean;
+  /** Hanya diisi di tab Sensitive — mewarnai border/ikon (bukan pill). */
+  sensitivityLevel?: SensitivityLevel;
+  sensitivityReason?: string;
   onClick?: () => void;
 }
 
@@ -136,6 +188,8 @@ export function GraphNodeCard({
   kind,
   selected,
   skeleton,
+  sensitivityLevel,
+  sensitivityReason,
   onClick
 }: GraphNodeCardProps) {
   const spearhead = spearheadName(name, filePath, kind);
@@ -146,6 +200,19 @@ export function GraphNodeCard({
   const resolvedIcon = iconKey || inferNodeIcon(name, filePath, kind);
   const Icon = getLucideIcon(resolvedIcon);
   const hasLlmSummary = Boolean(summary?.trim());
+  const useSensitivityChrome = Boolean(sensitivityLevel);
+  const borderClass = useSensitivityChrome
+    ? sensitivityBorder[sensitivityLevel!]
+    : roleBorder[role];
+  const accentClass = useSensitivityChrome
+    ? sensitivityAccent[sensitivityLevel!]
+    : roleAccent[role];
+  const glowClass = useSensitivityChrome
+    ? sensitivityGlow[sensitivityLevel!]
+    : roleGlow[role];
+  const folderBadgeClass = useSensitivityChrome
+    ? sensitivityFolderBadge[sensitivityLevel!]
+    : roleBadge[role];
   const body =
     summary?.trim() ||
     (role === 'entry'
@@ -159,10 +226,10 @@ export function GraphNodeCard({
       type="button"
       onClick={onClick}
       aria-busy={skeleton || undefined}
-      title={spearhead}
+      title={sensitivityReason ? `${spearhead} — ${sensitivityReason}` : spearhead}
       className={[
         'box-border flex w-[300px] cursor-pointer rounded-2xl border bg-[color-mix(in_srgb,var(--panel)_92%,transparent)] p-3.5 text-left shadow-[0_8px_28px_rgba(0,0,0,0.28)] transition',
-        roleBorder[role],
+        borderClass,
         selected
           ? 'bg-[var(--panel-l3)]'
           : 'hover:bg-[color-mix(in_srgb,var(--panel-l2)_88%,transparent)]'
@@ -171,10 +238,9 @@ export function GraphNodeCard({
       <div className="flex w-full gap-0">
         <div className="mr-3.5 flex w-14 shrink-0 items-center justify-center border-r border-[color-mix(in_srgb,var(--text-lo)_28%,transparent)] pr-3.5">
           <span
-            className={[
-              'flex h-12 w-12 items-center justify-center rounded-full',
-              roleGlow[role]
-            ].join(' ')}
+            className={['flex h-12 w-12 items-center justify-center rounded-full', glowClass].join(
+              ' '
+            )}
           >
             <Icon size={22} strokeWidth={1.85} />
           </span>
@@ -182,20 +248,22 @@ export function GraphNodeCard({
 
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           <div className="flex items-start justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-1.5">
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
               <FileCode
                 size={14}
                 strokeWidth={2}
-                className={['shrink-0', roleAccent[role]].join(' ')}
+                className={['shrink-0', accentClass].join(' ')}
               />
               <span className="truncate font-mono text-[10px] uppercase tracking-wide text-[var(--text-lo)]">
-                {kindLabel(kind, role)}
+                {useSensitivityChrome && sensitivityLevel
+                  ? tw(`sensitivity.level.${sensitivityLevel}`)
+                  : kindLabel(kind, role)}
               </span>
             </div>
             <span
               className={[
                 'inline-flex max-w-[108px] shrink-0 items-center gap-1 overflow-hidden rounded-full border px-2 py-0.5 font-mono text-[10px]',
-                roleBadge[role]
+                folderBadgeClass
               ].join(' ')}
             >
               <Folder size={11} strokeWidth={2} />
@@ -204,10 +272,9 @@ export function GraphNodeCard({
           </div>
 
           <div
-            className={[
-              'truncate font-mono text-[14px] font-semibold leading-snug',
-              roleAccent[role]
-            ].join(' ')}
+            className={['truncate font-mono text-[14px] font-semibold leading-snug', accentClass].join(
+              ' '
+            )}
           >
             {spearhead}
           </div>

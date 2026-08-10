@@ -1,5 +1,5 @@
 import { FaGitAlt } from 'react-icons/fa';
-import { Network } from 'lucide-react';
+import { Compass, Network, ShieldAlert } from 'lucide-react';
 import type { LlmInsightsStatus, MermaidGraphView, RepoMermaidBundle } from '../types';
 import { postToExtension } from '../vscodeApi';
 import { tw } from '../i18n';
@@ -8,7 +8,7 @@ function viewDefs(): {
   id: MermaidGraphView;
   label: string;
   hint: string;
-  icon?: 'git';
+  icon?: 'git' | 'sensitive' | 'compass';
 }[] {
   return [
     {
@@ -30,6 +30,18 @@ function viewDefs(): {
       id: 'functions',
       label: tw('view.functions'),
       hint: tw('view.functions.hint')
+    },
+    {
+      id: 'sensitive',
+      label: tw('view.sensitive'),
+      hint: tw('view.sensitive.hint'),
+      icon: 'sensitive'
+    },
+    {
+      id: 'compass',
+      label: tw('view.compass'),
+      hint: tw('view.compass.hint'),
+      icon: 'compass'
     },
     {
       id: 'git',
@@ -56,7 +68,7 @@ function sourceForView(bundle: RepoMermaidBundle, view: MermaidGraphView): strin
   if (view === 'modules') return bundle.modules;
   if (view === 'flow') return bundle.flow;
   if (view === 'functions') return bundle.functions;
-  if (view === 'git') return '';
+  if (view === 'sensitive' || view === 'compass' || view === 'git') return '';
   return bundle.architecture;
 }
 
@@ -101,11 +113,17 @@ export function HeaderBar({
                   view === v.id
                     ? v.id === 'git'
                       ? 'bg-[color-mix(in_srgb,#f97316_22%,transparent)] text-[#fdba74]'
-                      : 'bg-[color-mix(in_srgb,var(--role-entry)_22%,transparent)] text-[var(--role-entry)]'
+                      : v.id === 'sensitive'
+                        ? 'bg-[color-mix(in_srgb,#f87171_22%,transparent)] text-[#fca5a5]'
+                        : v.id === 'compass'
+                          ? 'bg-[color-mix(in_srgb,#2dd4bf_22%,transparent)] text-[#5eead4]'
+                          : 'bg-[color-mix(in_srgb,var(--role-entry)_22%,transparent)] text-[var(--role-entry)]'
                     : 'text-[var(--text-lo)] hover:bg-[color-mix(in_srgb,var(--text-lo)_12%,transparent)] hover:text-[var(--text-hi)]'
                 ].join(' ')}
               >
                 {v.icon === 'git' ? <FaGitAlt size={13} aria-hidden /> : null}
+                {v.icon === 'sensitive' ? <ShieldAlert size={13} aria-hidden /> : null}
+                {v.icon === 'compass' ? <Compass size={13} aria-hidden /> : null}
                 {v.label}
               </button>
               <div

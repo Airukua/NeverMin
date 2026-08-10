@@ -12,8 +12,24 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { GraphCardRole, GraphViewModel, MermaidNodeMeta } from '../types';
-import { GraphNodeCard, ROLE_HANDLE_COLOR, type NodeRole } from './GraphNodeCard';
+import { GraphNodeCard, handleColorForCard, type NodeRole } from './GraphNodeCard';
 import { tw } from '../i18n';
+
+type ConnectedHandles = {
+  top: boolean;
+  bottom: boolean;
+  left: boolean;
+  right: boolean;
+};
+
+type HandleSide = keyof ConnectedHandles;
+
+type SideRoles = {
+  source: boolean;
+  target: boolean;
+};
+
+type SideUsage = Record<HandleSide, SideRoles>;
 
 export type FlowCardData = {
   name: string;
@@ -22,14 +38,19 @@ export type FlowCardData = {
   iconKey?: string;
   role: NodeRole;
   kind?: string;
+  sensitivityLevel?: import('../types').SensitivityLevel;
+  sensitivityReason?: string;
   meta: MermaidNodeMeta;
   skeleton?: boolean;
+  /** Handle hanya dirender jika sisi ini punya edge. */
+  sideUsage: SideUsage;
 };
 
 type SectionLabelData = {
   label: string;
   hint?: string;
   role?: GraphCardRole;
+  accent?: string;
   width: number;
 };
 
@@ -44,23 +65,54 @@ const SECTION_ROLE_COLOR: Record<GraphCardRole, string> = {
   support: 'var(--role-support)'
 };
 
+function emptySideUsage(): SideUsage {
+  return {
+    top: { source: false, target: false },
+    bottom: { source: false, target: false },
+    left: { source: false, target: false },
+    right: { source: false, target: false }
+  };
+}
+
+const SIDE_POSITION: Record<HandleSide, Position> = {
+  top: Position.Top,
+  bottom: Position.Bottom,
+  left: Position.Left,
+  right: Position.Right
+};
+
 function GraphCardNode({ data, selected }: NodeProps<FlowCardNode>) {
-  const handleColor = ROLE_HANDLE_COLOR[data.role] ?? 'var(--role-entry)';
+  const handleColor = handleColorForCard(data.role, data.sensitivityLevel);
   const handleClass = '!h-2.5 !w-2.5 !border-0';
+  const sides = data.sideUsage;
   return (
     <div className="relative">
-      <Handle
-        type="target"
-        position={Position.Top}
-        className={handleClass}
-        style={{ background: handleColor }}
-      />
-      <Handle
-        type="target"
-        position={Position.Left}
-        className={handleClass}
-        style={{ background: handleColor }}
-      />
+      {(Object.keys(sides) as HandleSide[]).map((side) => {
+        const role = sides[side];
+        const pos = SIDE_POSITION[side];
+        return (
+          <span key={side}>
+            {role.target ? (
+              <Handle
+                id={`t-${side}`}
+                type="target"
+                position={pos}
+                className={handleClass}
+                style={{ background: handleColor }}
+              />
+            ) : null}
+            {role.source ? (
+              <Handle
+                id={`s-${side}`}
+                type="source"
+                position={pos}
+                className={handleClass}
+                style={{ background: handleColor }}
+              />
+            ) : null}
+          </span>
+        );
+      })}
       <GraphNodeCard
         name={data.name}
         filePath={data.filePath}
@@ -70,25 +122,16 @@ function GraphCardNode({ data, selected }: NodeProps<FlowCardNode>) {
         kind={data.kind}
         selected={selected}
         skeleton={data.skeleton}
-      />
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        className={handleClass}
-        style={{ background: handleColor }}
-      />
-      <Handle
-        type="source"
-        position={Position.Right}
-        className={handleClass}
-        style={{ background: handleColor }}
+        sensitivityLevel={data.sensitivityLevel}
+        sensitivityReason={data.sensitivityReason}
       />
     </div>
   );
 }
 
 function SectionLabelNodeView({ data }: NodeProps<SectionLabelNode>) {
-  const color = data.role ? SECTION_ROLE_COLOR[data.role] : 'var(--text-lo)';
+  const color =
+    data.accent || (data.role ? SECTION_ROLE_COLOR[data.role] : 'var(--text-lo)');
   return (
     <div
       className="pointer-events-none select-none"
@@ -125,6 +168,23 @@ const GAP_X = 48;
 const ROW_H = 260;
 const SECTION_GAP = 40;
 
+/** Pilih sisi source/target dari posisi relatif dua kartu. */
+function pickEdgeHandles(
+  source: { x: number; y: number },
+  target: { x: number; y: number }
+): { sourceHandle: HandleSide; targetHandle: HandleSide } {
+  const dx = target.x - source.x;
+  const dy = target.y - source.y;
+  if (Math.abs(dy) >= Math.abs(dx)) {
+    return dy >= 0
+      ? { sourceHandle: 'bottom', targetHandle: 'top' }
+      : { sourceHandle: 'top', targetHandle: 'bottom' };
+  }
+  return dx >= 0
+    ? { sourceHandle: 'right', targetHandle: 'left' }
+    : { sourceHandle: 'left', targetHandle: 'right' };
+}
+
 function toFlowElements(
   model: GraphViewModel,
   skeleton: boolean
@@ -140,7 +200,10 @@ function toFlowElements(
       iconKey: n.iconKey,
       role: n.role,
       kind: n.kind,
+      sensitivityLevel: n.sensitivityLevel,
+      sensitivityReason: n.sensitivityReason,
       skeleton,
+      sideUsage: emptySideUsage(),
       meta: {
         id: n.id,
         mermaidId: n.id,
@@ -150,7 +213,9 @@ function toFlowElements(
         startLine: n.startLine,
         endLine: n.endLine,
         summary: n.summary,
-        expandKey: n.expandKey
+        expandKey: n.expandKey,
+        sensitivityLevel: n.sensitivityLevel,
+        sensitivityReason: n.sensitivityReason
       }
     },
     draggable: true
@@ -188,6 +253,7 @@ function toFlowElements(
         label: section.label,
         hint: section.hint,
         role: section.role,
+        accent: section.accent,
         width
       },
       draggable: false,
@@ -197,19 +263,36 @@ function toFlowElements(
     });
   }
 
-  const edges: Edge[] = model.edges.map((e) => ({
-    id: e.id,
-    source: e.source,
-    target: e.target,
-    label: e.label,
-    animated: !e.dashed,
-    style: {
-      stroke: e.dashed ? 'var(--role-support)' : 'var(--role-entry)',
-      strokeWidth: 1.5,
-      strokeDasharray: e.dashed ? '6 4' : undefined
-    },
-    labelStyle: { fill: 'var(--text-lo)', fontSize: 10 }
-  }));
+  const nodeById = new Map(cardNodes.map((n) => [n.id, n]));
+  const edges: Edge[] = [];
+  for (const e of model.edges) {
+    const sourceNode = nodeById.get(e.source);
+    const targetNode = nodeById.get(e.target);
+    if (!sourceNode || !targetNode) continue;
+
+    const { sourceHandle, targetHandle } = pickEdgeHandles(
+      sourceNode.position,
+      targetNode.position
+    );
+    sourceNode.data.sideUsage[sourceHandle].source = true;
+    targetNode.data.sideUsage[targetHandle].target = true;
+
+    edges.push({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      sourceHandle: `s-${sourceHandle}`,
+      targetHandle: `t-${targetHandle}`,
+      label: e.label,
+      animated: !e.dashed,
+      style: {
+        stroke: e.dashed ? 'var(--role-support)' : 'var(--role-entry)',
+        strokeWidth: 1.5,
+        strokeDasharray: e.dashed ? '6 4' : undefined
+      },
+      labelStyle: { fill: 'var(--text-lo)', fontSize: 10 }
+    });
+  }
 
   return { nodes: [...sectionNodes, ...cardNodes], edges };
 }
