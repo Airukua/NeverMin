@@ -11,9 +11,9 @@ A VS Code / Cursor extension that parses your project, builds a code graph, and 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Privacy: Local-first](https://img.shields.io/badge/Privacy-Local--first-brightgreen)](#-privacy--security)
 <br>
-![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?logo=javascript&logoColor=000)
-![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=fff)
-![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=fff)
+<img src="https://cdn.simpleicons.org/javascript/F7DF1E" width="32" height="32" alt="JavaScript" title="JavaScript" />
+<img src="https://cdn.simpleicons.org/typescript/3178C6" width="32" height="32" alt="TypeScript" title="TypeScript" />
+<img src="https://cdn.simpleicons.org/python/3776AB" width="32" height="32" alt="Python" title="Python" />
 
 **[Install from Marketplace](https://marketplace.visualstudio.com/items?itemName=abdul-wahid-rukua.nevermin)** · [Quick Start](#-quick-start) · [Privacy & Security](#-privacy--security) · [Commands](#-commands-reference) · [Settings](#%EF%B8%8F-settings)
 
@@ -295,10 +295,10 @@ The sidebar **Pengaturan** panel mirrors the important actions: privacy mode, la
 
 | | Extension | Parser |
 |---|---|---|
-| ![JS](https://img.shields.io/badge/-F7DF1E?logo=javascript&logoColor=000) | `.js` / `.jsx` | Regex fallback |
-| ![TS](https://img.shields.io/badge/-3178C6?logo=typescript&logoColor=fff) | `.ts` | Tree-sitter TypeScript |
-| ![TSX](https://img.shields.io/badge/-3178C6?logo=react&logoColor=fff) | `.tsx` | Tree-sitter TSX |
-| ![Python](https://img.shields.io/badge/-3776AB?logo=python&logoColor=fff) | `.py` | Tree-sitter Python |
+| <img src="https://cdn.simpleicons.org/javascript/F7DF1E" width="20" height="20" alt="JS" /> | `.js` / `.jsx` | Regex fallback |
+| <img src="https://cdn.simpleicons.org/typescript/3178C6" width="20" height="20" alt="TS" /> | `.ts` | Tree-sitter TypeScript |
+| <img src="https://cdn.simpleicons.org/react/61DAFB" width="20" height="20" alt="TSX" /> | `.tsx` | Tree-sitter TSX |
+| <img src="https://cdn.simpleicons.org/python/3776AB" width="20" height="20" alt="Python" /> | `.py` | Tree-sitter Python |
 
 If the Tree-sitter WASM fails to load, symbol extraction still falls back and works.
 
