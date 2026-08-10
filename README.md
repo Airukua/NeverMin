@@ -10,7 +10,10 @@ A VS Code / Cursor extension that parses your project, builds a code graph, and 
 [![Marketplace](https://img.shields.io/badge/VS%20Code-Install-blue?logo=visualstudiocode)](https://marketplace.visualstudio.com/items?itemName=abdul-wahid-rukua.nevermin)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Privacy: Local-first](https://img.shields.io/badge/Privacy-Local--first-brightgreen)](#-privacy--security)
-[![Languages: JS/TS/Python](https://img.shields.io/badge/Languages-JS%2FTS%20%7C%20Python-yellow)](#-parsed-languages)
+<br>
+![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?logo=javascript&logoColor=000)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=fff)
+![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=fff)
 
 **[Install from Marketplace](https://marketplace.visualstudio.com/items?itemName=abdul-wahid-rukua.nevermin)** · [Quick Start](#-quick-start) · [Privacy & Security](#-privacy--security) · [Commands](#-commands-reference) · [Settings](#%EF%B8%8F-settings)
 
@@ -290,12 +293,12 @@ The sidebar **Pengaturan** panel mirrors the important actions: privacy mode, la
 
 > **Current scope:** NeverMIN currently supports the **JavaScript family** (JS/JSX/TS/TSX) and **Python** only. Other languages are not yet parsed — support for more is on the roadmap.
 
-| Extension | Parser |
-|---|---|
-| `.ts` | Tree-sitter TypeScript |
-| `.tsx` | Tree-sitter TSX |
-| `.py` | Tree-sitter Python |
-| `.js` / `.jsx` | Regex fallback |
+| | Extension | Parser |
+|---|---|---|
+| ![JS](https://img.shields.io/badge/-F7DF1E?logo=javascript&logoColor=000) | `.js` / `.jsx` | Regex fallback |
+| ![TS](https://img.shields.io/badge/-3178C6?logo=typescript&logoColor=fff) | `.ts` | Tree-sitter TypeScript |
+| ![TSX](https://img.shields.io/badge/-3178C6?logo=react&logoColor=fff) | `.tsx` | Tree-sitter TSX |
+| ![Python](https://img.shields.io/badge/-3776AB?logo=python&logoColor=fff) | `.py` | Tree-sitter Python |
 
 If the Tree-sitter WASM fails to load, symbol extraction still falls back and works.
 
