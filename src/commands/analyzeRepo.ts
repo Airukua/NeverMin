@@ -7,6 +7,7 @@ import { analyzeRepoFiles, RepoFileSnapshot } from '../core/analysis/repoAnalyze
 import { buildGraphInsightsPrompt, buildNodeSummariesPrompt, parseNodeSummariesResponse, parseGraphInsightsLlmResponse, applyGraphInsightsLlmPayload } from '../core/llm/promptBuilder';
 import { createLlmProvider } from '../core/llm/llmClient';
 import { collectDiagramSummaryTargets } from '../core/graph/repoMermaid';
+import { resolveOllamaThinkOption } from '../core/llm/thinkingModel';
 import { Logger } from '../utils/logger';
 import {
   getLanguage,
@@ -186,7 +187,8 @@ async function enrichInsightsWithNarrative(
         () =>
           provider.complete(prompt, {
             skipCache: attempt > 0,
-            cacheResponse: false
+            cacheResponse: false,
+            think: resolveOllamaThinkOption(session.provider, session.model, 'prefer-off')
           }),
         withCompletionUsageSummary(summarizeNarrativeResult)
       );
@@ -326,9 +328,8 @@ async function enrichInsightsWithNodeSummaries(
             const result = await provider.complete(prompt, {
               skipCache: attempt > 0,
               cacheResponse: false,
-              // Thinking models (qwen3) harus OFF untuk JSON ketat — thinking menghabiskan
-              // token dan sering menghasilkan key/JSON invalid.
-              think: false
+              // Strict JSON: only send think:false for known thinking models.
+              think: resolveOllamaThinkOption(session.provider, session.model, 'prefer-off')
             });
             parsed = parseNodeSummariesResponse(result.text, batch);
             return result;

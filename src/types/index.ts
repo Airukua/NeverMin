@@ -57,9 +57,10 @@ export interface LlmCompleteOptions {
   /** Default true. Set false untuk call yang belum divalidasi (retry semantik). */
   cacheResponse?: boolean;
   /**
-   * Ollama thinking models (qwen3, deepseek-r1, …).
-   * true/level → minta trace; false → matikan (penting untuk JSON terstruktur).
-   * Diabaikan provider non-Ollama.
+   * Ollama thinking models only (qwen3, deepseek-r1, …).
+   * Omit for non-thinking models — never assume every Ollama model supports `think`.
+   * true/level → enable; false → disable (JSON). Undefined → do not send the field.
+   * Ignored by non-Ollama providers.
    */
   think?: boolean | 'low' | 'medium' | 'high' | 'max';
   /** Abort in-flight stream/complete. */

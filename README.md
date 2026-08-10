@@ -73,11 +73,47 @@ To stay leak-free: keep `nevermin.provider` = `ollama`, or skip LLM features ent
 
 ## How to use in VS Code / Cursor
 
-### A. Install permanently in VS Code (recommended)
+### A. Install from the Marketplace (recommended)
 
-Marketplace release is not available yet. Install from a local `.vsix` so NeverMIN stays enabled like any other extension (no F5 needed).
+**NeverMIN** is on the Visual Studio Marketplace:
 
-#### 1. Build the `.vsix`
+**[Install NeverMIN](https://marketplace.visualstudio.com/items?itemName=abdul-wahid-rukua.nevermin)**
+
+**VS Code**
+
+1. Open **Extensions** (`Ctrl+Shift+X` / `Cmd+Shift+X`).
+2. Search **NeverMIN**.
+3. Click **Install**, then reload if prompted.
+
+**Cursor**
+
+Cursor can install many VS Code Marketplace extensions the same way: Extensions → search **NeverMIN** → **Install**.  
+If it does not appear in search, use [Install from VSIX](#b-install-from-vsix-optional) below.
+
+#### Confirm it is installed
+
+- Extensions list → **NeverMIN** → installed and enabled.
+- Left **Activity Bar** → NeverMIN icon should appear.
+- Command Palette → commands starting with `NeverMIN:`.
+
+#### Use it on a project
+
+1. **File → Open Folder…** and open the codebase you want to understand.
+2. Click the **NeverMIN** icon in the Activity Bar.
+3. First run: choose **Private codebase** (local / Ollama only) or **Public codebase** (optional cloud LLM).
+4. In the sidebar:
+   - **2. Run** → analyze the whole repo, or
+   - **3. Select Files** → check files → analyze the selection.
+5. After analysis:
+   - **4. Structure** → Folder → File → Function; click an item to open the **Functions** graph.
+   - **5. Analysis Results** → entry / hub / main flow / mind map.
+   - **6. Git History** → optional churn / owners / coupling (needs a git repo).
+
+Optional LLM: Command Palette → pick provider (prefer **Ollama** for private code). See [Everyday workflow](#everyday-workflow) and [Privacy & security](#privacy--security--analyze-without-leaking-your-code).
+
+### B. Install from VSIX (optional)
+
+Use this if you want a local build, a pre-release build, or Marketplace search is unavailable in your editor.
 
 Requirements: **Node.js 18+**, **npm**.
 
@@ -88,58 +124,24 @@ npm install
 npm run package
 ```
 
-This compiles the extension and writes a file such as `nevermin-0.0.1.vsix` in the repo root (version matches `package.json`).
+This writes `nevermin-<version>.vsix` in the repo root (version from `package.json`).
 
-#### 2. Install into VS Code
-
-**UI**
-
-1. Open **VS Code**.
-2. Go to **Extensions** (`Ctrl+Shift+X` / `Cmd+Shift+X`).
-3. Open the `…` menu (top-right of the Extensions view).
-4. Choose **Install from VSIX…**.
-5. Select the generated `nevermin-*.vsix`.
-6. Reload VS Code if prompted.
+**UI:** Extensions → `…` → **Install from VSIX…** → select the `.vsix` → reload if prompted.
 
 **CLI**
 
 ```bash
-code --install-extension ./nevermin-0.0.1.vsix
+code --install-extension ./nevermin-0.0.2.vsix
+# or, for Cursor:
+cursor --install-extension ./nevermin-0.0.2.vsix
 ```
 
-For **Cursor**, use the same VSIX flow in Cursor’s Extensions view, or:
+**Update / uninstall**
 
-```bash
-cursor --install-extension ./nevermin-0.0.1.vsix
-```
+- **Marketplace:** Extensions → NeverMIN → Update / Uninstall.
+- **VSIX:** rebuild with `npm run package`, install again (replaces the previous version), or Uninstall from Extensions.
 
-#### 3. Confirm it is installed
-
-- Extensions list → search **NeverMIN** → it should show as installed and enabled.
-- Left **Activity Bar** → NeverMIN icon should appear.
-- Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) → commands starting with `NeverMIN:` should be listed.
-
-#### 4. Use it on a project
-
-1. **File → Open Folder…** and open the codebase you want to understand (not the NeverMIN extension repo, unless you are analyzing NeverMIN itself).
-2. Click the **NeverMIN** icon in the Activity Bar.
-3. First run: choose **Private codebase** (local / Ollama only) or **Public codebase** (optional cloud LLM).
-4. In the sidebar:
-   - **2. Run** → analyze the whole repo, or
-   - **3. Select Files** → check files → analyze the selection.
-5. After analysis:
-   - **4. Structure** → Folder → File → Function; click an item to open the **Functions** graph in the Code Graph webview.
-   - **5. Analysis Results** → entry / hub / main flow / mind map.
-   - **6. Git History** → optional churn / owners / coupling (needs a git repo).
-
-Optional LLM: Command Palette → `NeverMIN: Pilih LLM Provider` (prefer **Ollama** for private code). See [Everyday workflow](#everyday-workflow) and [Privacy & security](#privacy--security--analyze-without-leaking-your-code).
-
-#### 5. Update or uninstall
-
-- **Update:** pull latest code → `npm run package` → Install from VSIX again (same steps; VS Code replaces the previous version).
-- **Uninstall:** Extensions → NeverMIN → **Uninstall**.
-
-### B. Run from source (development)
+### C. Run from source (development)
 
 For hacking on NeverMIN itself (Extension Development Host):
 
@@ -157,7 +159,7 @@ npm run compile
 4. In that window, go to **File → Open Folder** and select the project you want to analyze.
 5. In the left Activity Bar, click the **NeverMIN** icon.
 
-> Development Host is temporary for testing. For daily use, prefer [Install permanently](#a-install-permanently-in-vs-code-recommended) via `.vsix`.
+> Development Host is temporary for testing. For daily use, prefer [Install from the Marketplace](#a-install-from-the-marketplace-recommended).
 
 ---
 

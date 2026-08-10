@@ -11,6 +11,7 @@ import {
 } from '../core/llm/gapExplainPrompt';
 import { createLlmProvider } from '../core/llm/llmClient';
 import { setCachedPromptResponse } from '../core/llm/promptCache';
+import { resolveOllamaThinkOption } from '../core/llm/thinkingModel';
 import { t } from '../i18n';
 import { getLanguage, getLlmTemperature } from '../utils/config';
 import { isGitRepository, resolveGitRoot, runGit } from '../utils/gitCli';
@@ -239,7 +240,7 @@ export function registerExplainContributionGapCommand(
             provider.complete(prompt, {
               skipCache: false,
               cacheResponse: false,
-              think: false
+              think: resolveOllamaThinkOption(session.provider, session.model, 'prefer-off')
             }),
           withCompletionUsageSummary((text) =>
             text.trim() ? `gapExplain ${Math.min(text.trim().length, 9999)}c` : 'empty'

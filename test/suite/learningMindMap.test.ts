@@ -112,4 +112,27 @@ describe('learning mind map', () => {
     const model = buildLearningMindMapModel(emptyInsights(), { lang: 'en' });
     assert.strictEqual(model.rootTitle, 'Learning breakdown');
   });
+
+  it('tidak menduplikasi node yang sama di Start dan Hubs', () => {
+    const shared = {
+      id: 'same-1',
+      name: 'SharedFn',
+      kind: 'function' as const,
+      filePath: '/src/shared.ts',
+      startLine: 1,
+      endLine: 10,
+      score: 10,
+      reason: 'both'
+    };
+    const insights = emptyInsights({
+      entryPoints: [shared],
+      hubs: [shared, { ...shared, id: 'hub-2', name: 'OtherHub', score: 9 }]
+    });
+    const model = buildLearningMindMapModel(insights, { lang: 'en' });
+    const start = model.branches.find((b) => b.id === 'start');
+    const hubs = model.branches.find((b) => b.id === 'hubs');
+    assert.ok(start?.children.some((c) => c.name === 'SharedFn'));
+    assert.ok(!hubs?.children.some((c) => c.name === 'SharedFn'));
+    assert.ok(hubs?.children.some((c) => c.name === 'OtherHub'));
+  });
 });

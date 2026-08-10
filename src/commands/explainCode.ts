@@ -3,6 +3,7 @@ import { createLlmProvider } from '../core/llm/llmClient';
 import { buildExplainPrompt } from '../core/llm/promptBuilder';
 import { buildScopedExplainPrompt, type ExplainGraphView } from '../core/llm/explainNodeContext';
 import { completeWithOptionalStream } from '../core/llm/streamComplete';
+import { resolveOllamaThinkOption } from '../core/llm/thinkingModel';
 import { buildContextFromFile } from '../core/context/contextBuilder';
 import { getLanguage, getLlmTemperature } from '../utils/config';
 import { Logger } from '../utils/logger';
@@ -79,6 +80,7 @@ async function runPromptCompletion(
         temperature: getLlmTemperature(),
         baseUrl: session.baseUrl
       });
+      const think = resolveOllamaThinkOption(session.provider, session.model, 'prefer-on');
 
       const abort = new AbortController();
       const cancelSub = token.onCancellationRequested(() => abort.abort());
@@ -97,12 +99,12 @@ async function runPromptCompletion(
                   prompt,
                   { onToken: options.onToken! },
                   {
-                    think: session.provider === 'ollama' ? true : undefined,
+                    think,
                     signal: abort.signal
                   }
                 )
               : provider.complete(prompt, {
-                  think: session.provider === 'ollama' ? true : undefined,
+                  think,
                   signal: abort.signal
                 }),
           withCompletionUsageSummary(summarizeExplainResult)

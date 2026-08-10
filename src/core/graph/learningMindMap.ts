@@ -18,6 +18,49 @@ function indent(level: number): string {
   return '  '.repeat(level);
 }
 
+function normPath(p: string): string {
+  return p.replace(/\\/g, '/').toLowerCase();
+}
+
+/** Stable identity for mind-map leaves (graph id, or path+name+line). */
+export function mindLeafKey(leaf: {
+  id?: string;
+  name?: string;
+  filePath?: string;
+  startLine?: number;
+}): string {
+  const id = (leaf.id || '').trim();
+  if (id && !id.startsWith('folder:')) {
+    return `id:${id}`;
+  }
+  const path = leaf.filePath ? normPath(leaf.filePath) : '';
+  const name = (leaf.name || '').trim().toLowerCase();
+  const line = leaf.startLine ?? 0;
+  if (path && name) return `sym:${path}::${name}::${line}`;
+  if (name) return `name:${name}`;
+  if (id) return `id:${id}`;
+  return `row:${path}:${line}`;
+}
+
+/** Drop duplicate leaves; prefers first occurrence. */
+export function dedupeMindLeaves(leaves: LearningMindMapLeaf[]): LearningMindMapLeaf[] {
+  const seen = new Set<string>();
+  const seenNames = new Set<string>();
+  const out: LearningMindMapLeaf[] = [];
+  for (const leaf of leaves) {
+    if (!leaf?.name?.trim()) continue;
+    const key = mindLeafKey(leaf);
+    if (seen.has(key)) continue;
+    // Same display name under one parent → keep first (avoid "foo, foo, foo")
+    const nameKey = leaf.name.trim().toLowerCase();
+    if (seenNames.has(nameKey)) continue;
+    seen.add(key);
+    seenNames.add(nameKey);
+    out.push(leaf);
+  }
+  return out;
+}
+
 function foldersFromInsights(insights: GraphInsights, limit = 8): string[] {
   const counts = new Map<string, number>();
   const bump = (filePath: string) => {
@@ -103,6 +146,21 @@ function branchLabels(lang: NeverminLanguage) {
   };
 }
 
+type ClaimedIds = Set<string>;
+
+function tryClaim(
+  claimed: ClaimedIds,
+  id: string,
+  filePath?: string,
+  name?: string,
+  startLine?: number
+): boolean {
+  const key = mindLeafKey({ id, filePath, name, startLine });
+  if (claimed.has(key)) return false;
+  claimed.add(key);
+  return true;
+}
+
 /**
  * Structured learning mind map for the React webview.
  */
@@ -113,15 +171,30 @@ export function buildLearningMindMapModel(
   const lang = options.lang ?? 'id';
   const labels = branchLabels(lang);
   const rootTitle = options.rootTitle || labels.root;
+  const claimed: ClaimedIds = new Set();
 
-  const entries = insights.entryPoints.slice(0, 5);
-  const hubs = insights.hubs.slice(0, 5);
-  const stages = insights.mainFlow ? uniqueMainFlowStages(insights.mainFlow).slice(0, 6) : [];
+  const entries = insights.entryPoints
+    .slice(0, 8)
+    .filter((entry) => tryClaim(claimed, entry.id, entry.filePath, entry.name, entry.startLine))
+    .slice(0, 5);
+  const stages = (insights.mainFlow ? uniqueMainFlowStages(insights.mainFlow) : [])
+    .slice(0, 10)
+    .filter((stage) =>
+      tryClaim(claimed, stage.nodeId, stage.filePath, stage.name, stage.startLine)
+    )
+    .slice(0, 6);
+  const hubs = insights.hubs
+    .slice(0, 8)
+    .filter((hub) => tryClaim(claimed, hub.id, hub.filePath, hub.name, hub.startLine))
+    .slice(0, 5);
   const folders = (options.folders?.length ? options.folders : foldersFromInsights(insights)).slice(
     0,
     8
   );
-  const orphans = (insights.orphanFiles ?? []).slice(0, 4);
+  const orphans = (insights.orphanFiles ?? [])
+    .slice(0, 8)
+    .filter((orphan) => tryClaim(claimed, orphan.id, orphan.filePath, orphan.name, orphan.startLine))
+    .slice(0, 4);
 
   const branches: LearningMindMapBranch[] = [];
 
@@ -130,15 +203,17 @@ export function buildLearningMindMapModel(
       id: 'start',
       label: labels.start,
       accent: 'entry',
-      children: entries.map((entry) => ({
-        id: entry.id,
-        name: entry.name,
-        filePath: entry.filePath,
-        startLine: entry.startLine,
-        endLine: entry.endLine,
-        kind: entry.kind,
-        role: 'entry'
-      }))
+      children: dedupeMindLeaves(
+        entries.map((entry) => ({
+          id: entry.id,
+          name: entry.name,
+          filePath: entry.filePath,
+          startLine: entry.startLine,
+          endLine: entry.endLine,
+          kind: entry.kind,
+          role: 'entry'
+        }))
+      )
     });
   }
 
@@ -147,14 +222,16 @@ export function buildLearningMindMapModel(
       id: 'flow',
       label: labels.flow,
       accent: 'pipeline',
-      children: stages.map((stage) => ({
-        id: stage.nodeId,
-        name: stage.name,
-        filePath: stage.filePath || undefined,
-        startLine: stage.startLine,
-        endLine: stage.endLine,
-        role: stage.role
-      }))
+      children: dedupeMindLeaves(
+        stages.map((stage) => ({
+          id: stage.nodeId,
+          name: stage.name,
+          filePath: stage.filePath || undefined,
+          startLine: stage.startLine,
+          endLine: stage.endLine,
+          role: stage.role
+        }))
+      )
     });
   }
 
@@ -163,28 +240,38 @@ export function buildLearningMindMapModel(
       id: 'hubs',
       label: labels.hubs,
       accent: 'hub',
-      children: hubs.map((hub) => ({
-        id: hub.id,
-        name: hub.name,
-        filePath: hub.filePath,
-        startLine: hub.startLine,
-        endLine: hub.endLine,
-        kind: hub.kind,
-        role: 'hub'
-      }))
+      children: dedupeMindLeaves(
+        hubs.map((hub) => ({
+          id: hub.id,
+          name: hub.name,
+          filePath: hub.filePath,
+          startLine: hub.startLine,
+          endLine: hub.endLine,
+          kind: hub.kind,
+          role: 'hub'
+        }))
+      )
     });
   }
 
   if (folders.length > 0) {
+    const seenFolders = new Set<string>();
+    const folderLeaves: LearningMindMapLeaf[] = [];
+    folders.forEach((folder, index) => {
+      const key = folder.replace(/\\/g, '/').toLowerCase();
+      if (seenFolders.has(key)) return;
+      seenFolders.add(key);
+      folderLeaves.push({
+        id: `folder:${folder}:${index}`,
+        name: folder,
+        role: 'module'
+      });
+    });
     branches.push({
       id: 'modules',
       label: labels.modules,
       accent: 'modules',
-      children: folders.map((folder, index) => ({
-        id: `folder:${folder}:${index}`,
-        name: folder,
-        role: 'module'
-      }))
+      children: folderLeaves
     });
   }
 
@@ -193,14 +280,16 @@ export function buildLearningMindMapModel(
       id: 'later',
       label: labels.later,
       accent: 'later',
-      children: orphans.map((orphan) => ({
-        id: orphan.id,
-        name: orphan.name,
-        filePath: orphan.filePath,
-        startLine: orphan.startLine,
-        endLine: orphan.endLine,
-        kind: orphan.kind
-      }))
+      children: dedupeMindLeaves(
+        orphans.map((orphan) => ({
+          id: orphan.id,
+          name: orphan.name,
+          filePath: orphan.filePath,
+          startLine: orphan.startLine,
+          endLine: orphan.endLine,
+          kind: orphan.kind
+        }))
+      )
     });
   }
 
@@ -213,7 +302,7 @@ export function buildLearningMindMapModel(
     });
   }
 
-  const mermaid = buildLearningMindMapMermaid(insights, options);
+  const mermaid = buildLearningMindMapMermaidFromModel(rootTitle, labels, branches);
 
   return {
     rootTitle,
@@ -229,6 +318,37 @@ export function buildLearningMindMapModel(
   };
 }
 
+function buildLearningMindMapMermaidFromModel(
+  root: string,
+  labels: ReturnType<typeof branchLabels>,
+  branches: LearningMindMapBranch[]
+): string {
+  const lines: string[] = ['mindmap', `${indent(1)}root((${sanitizeMindLabel(root, 40)}))`];
+
+  if (branches.every((b) => b.children.length === 0)) {
+    lines.push(`${indent(2)}${sanitizeMindLabel(labels.empty)}`);
+    return lines.join('\n');
+  }
+
+  for (const branch of branches) {
+    if (branch.children.length === 0) continue;
+    lines.push(`${indent(2)}${sanitizeMindLabel(branch.label)}`);
+    for (const child of branch.children) {
+      const prefix =
+        branch.id === 'flow'
+          ? child.role === 'input'
+            ? 'in: '
+            : child.role === 'output'
+              ? 'out: '
+              : ''
+          : '';
+      lines.push(`${indent(3)}${sanitizeMindLabel(prefix + child.name)}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
 /**
  * Mind map pecahan belajar: mulai dari entry → alur utama → hub → modul folder.
  * Mermaid mindmap (indent-based) — kept for Copy/Source.
@@ -237,71 +357,10 @@ export function buildLearningMindMapMermaid(
   insights: GraphInsights,
   options: LearningMindMapOptions = {}
 ): string {
-  const lang = options.lang ?? 'id';
-  const labels = branchLabels(lang);
-  const root = options.rootTitle || labels.root;
-
-  const lines: string[] = ['mindmap', `${indent(1)}root((${sanitizeMindLabel(root, 40)}))`];
-
-  const entries = insights.entryPoints.slice(0, 5);
-  const hubs = insights.hubs.slice(0, 5);
-  const stages = insights.mainFlow ? uniqueMainFlowStages(insights.mainFlow).slice(0, 6) : [];
-  const folders = (options.folders?.length ? options.folders : foldersFromInsights(insights)).slice(
-    0,
-    8
-  );
-  const orphans = (insights.orphanFiles ?? []).slice(0, 4);
-
-  if (entries.length === 0 && hubs.length === 0 && stages.length === 0 && folders.length === 0) {
-    lines.push(`${indent(2)}${sanitizeMindLabel(labels.empty)}`);
-    return lines.join('\n');
-  }
-
-  if (entries.length > 0) {
-    lines.push(`${indent(2)}${sanitizeMindLabel(labels.start)}`);
-    for (const entry of entries) {
-      lines.push(`${indent(3)}${sanitizeMindLabel(entry.name)}`);
-    }
-  }
-
-  if (stages.length > 0) {
-    lines.push(`${indent(2)}${sanitizeMindLabel(labels.flow)}`);
-    for (const stage of stages) {
-      const prefix =
-        stage.role === 'input' ? 'in: ' : stage.role === 'output' ? 'out: ' : '';
-      lines.push(`${indent(3)}${sanitizeMindLabel(prefix + stage.name)}`);
-    }
-  }
-
-  if (hubs.length > 0) {
-    lines.push(`${indent(2)}${sanitizeMindLabel(labels.hubs)}`);
-    for (const hub of hubs) {
-      lines.push(`${indent(3)}${sanitizeMindLabel(hub.name)}`);
-    }
-  }
-
-  if (folders.length > 0) {
-    lines.push(`${indent(2)}${sanitizeMindLabel(labels.modules)}`);
-    for (const folder of folders) {
-      lines.push(`${indent(3)}${sanitizeMindLabel(folder, 42)}`);
-    }
-  }
-
-  if (orphans.length > 0) {
-    lines.push(`${indent(2)}${sanitizeMindLabel(labels.later)}`);
-    for (const orphan of orphans) {
-      lines.push(`${indent(3)}${sanitizeMindLabel(orphan.name)}`);
-    }
-  }
-
-  return lines.join('\n');
+  return buildLearningMindMapModel(insights, options).mermaid;
 }
 
 const BREAKDOWN_KINDS = new Set(['calls', 'uses', 'defines']);
-
-function normPath(p: string): string {
-  return p.replace(/\\/g, '/').toLowerCase();
-}
 
 function findGraphNode(graph: CodeGraph, leaf: LearningMindMapLeaf): GraphNode | undefined {
   if (leaf.id && !leaf.id.startsWith('folder:')) {
@@ -335,42 +394,44 @@ function nodeToLeaf(node: GraphNode, role?: string): LearningMindMapLeaf {
 export function heuristicChildrenForLeaf(
   leaf: LearningMindMapLeaf,
   graph: CodeGraph,
-  limit = 5
+  limit = 5,
+  blocked: ReadonlySet<string> = new Set()
 ): LearningMindMapLeaf[] {
   if (leaf.id.startsWith('folder:')) {
     const folderKey = leaf.name.replace(/\\/g, '/').toLowerCase();
-    const seen = new Set<string>();
-    const out: LearningMindMapLeaf[] = [];
+    const raw: LearningMindMapLeaf[] = [];
     for (const node of graph.nodes) {
       const fp = normPath(node.filePath);
       if (!fp.includes(`/${folderKey}/`) && !fp.endsWith(`/${folderKey}`) && !fp.includes(folderKey)) {
         continue;
       }
       if (node.kind === 'file') continue;
-      if (seen.has(node.id)) continue;
-      seen.add(node.id);
-      out.push(nodeToLeaf(node, 'symbol'));
-      if (out.length >= limit) break;
+      const key = mindLeafKey(node);
+      if (blocked.has(key)) continue;
+      raw.push(nodeToLeaf(node, 'symbol'));
+      if (raw.length >= limit * 3) break;
     }
-    return out;
+    return dedupeMindLeaves(raw).slice(0, limit);
   }
 
   const source = findGraphNode(graph, leaf);
   if (!source) return [];
 
-  const seen = new Set<string>([source.id]);
-  const out: LearningMindMapLeaf[] = [];
+  const raw: LearningMindMapLeaf[] = [];
+  const localBlocked = new Set(blocked);
+  localBlocked.add(mindLeafKey(source));
   for (const edge of graph.edges) {
     if (edge.from !== source.id) continue;
     if (!BREAKDOWN_KINDS.has(edge.kind)) continue;
-    if (seen.has(edge.to)) continue;
     const target = graph.nodes.find((n) => n.id === edge.to);
     if (!target || target.kind === 'file') continue;
-    seen.add(edge.to);
-    out.push(nodeToLeaf(target, edge.kind));
-    if (out.length >= limit) break;
+    const key = mindLeafKey(target);
+    if (localBlocked.has(key)) continue;
+    localBlocked.add(key);
+    raw.push(nodeToLeaf(target, edge.kind));
+    if (raw.length >= limit * 2) break;
   }
-  return out;
+  return dedupeMindLeaves(raw).slice(0, limit);
 }
 
 /**
@@ -386,19 +447,28 @@ export function attachHeuristicMindMapBreakdown(
   const maxPerLeaf = options.maxPerLeaf ?? 5;
   const maxDepth = Math.max(1, Math.min(options.depth ?? 2, 3));
 
-  const expand = (leaf: LearningMindMapLeaf, depthLeft: number): LearningMindMapLeaf => {
+  const expand = (
+    leaf: LearningMindMapLeaf,
+    depthLeft: number,
+    ancestors: ReadonlySet<string>
+  ): LearningMindMapLeaf => {
+    const selfKey = mindLeafKey(leaf);
+    const nextAncestors = new Set(ancestors);
+    nextAncestors.add(selfKey);
+
     if (leaf.children && leaf.children.length > 0) {
-      return {
-        ...leaf,
-        children: depthLeft > 1 ? leaf.children.map((c) => expand(c, depthLeft - 1)) : leaf.children
-      };
+      const kids = dedupeMindLeaves(leaf.children)
+        .filter((c) => !nextAncestors.has(mindLeafKey(c)))
+        .map((c) => (depthLeft > 1 ? expand(c, depthLeft - 1, nextAncestors) : c));
+      return kids.length > 0 ? { ...leaf, children: kids } : { ...leaf, children: undefined };
     }
     if (depthLeft <= 0) return leaf;
-    const kids = heuristicChildrenForLeaf(leaf, graph, maxPerLeaf);
+    const kids = heuristicChildrenForLeaf(leaf, graph, maxPerLeaf, nextAncestors);
     if (kids.length === 0) return leaf;
     return {
       ...leaf,
-      children: depthLeft > 1 ? kids.map((c) => expand(c, depthLeft - 1)) : kids
+      children:
+        depthLeft > 1 ? kids.map((c) => expand(c, depthLeft - 1, nextAncestors)) : kids
     };
   };
 
@@ -406,7 +476,7 @@ export function attachHeuristicMindMapBreakdown(
     ...model,
     branches: model.branches.map((branch) => ({
       ...branch,
-      children: branch.children.map((leaf) => expand(leaf, maxDepth))
+      children: dedupeMindLeaves(branch.children).map((leaf) => expand(leaf, maxDepth, new Set()))
     }))
   };
 }
@@ -416,13 +486,24 @@ export function mergeMindMapBreakdown(
   model: LearningMindMapModel,
   byParentId: Record<string, LearningMindMapLeaf[]>
 ): LearningMindMapModel {
-  const apply = (leaf: LearningMindMapLeaf): LearningMindMapLeaf => {
-    const existing = leaf.children?.filter(Boolean) ?? [];
+  const apply = (leaf: LearningMindMapLeaf, ancestors: ReadonlySet<string>): LearningMindMapLeaf => {
+    const selfKey = mindLeafKey(leaf);
+    const nextAncestors = new Set(ancestors);
+    nextAncestors.add(selfKey);
+
+    const existing = dedupeMindLeaves(leaf.children?.filter(Boolean) ?? []).filter(
+      (c) => !nextAncestors.has(mindLeafKey(c))
+    );
     if (existing.length > 0) {
-      return { ...leaf, children: existing.map(apply) };
+      return {
+        ...leaf,
+        children: existing.map((c) => apply(c, nextAncestors))
+      };
     }
-    const extra = byParentId[leaf.id];
-    if (!extra || extra.length === 0) return leaf;
+    const extra = dedupeMindLeaves(byParentId[leaf.id] ?? []).filter(
+      (c) => !nextAncestors.has(mindLeafKey(c))
+    );
+    if (extra.length === 0) return leaf;
     return { ...leaf, children: extra };
   };
 
@@ -430,7 +511,7 @@ export function mergeMindMapBreakdown(
     ...model,
     branches: model.branches.map((branch) => ({
       ...branch,
-      children: branch.children.map(apply)
+      children: dedupeMindLeaves(branch.children).map((leaf) => apply(leaf, new Set()))
     }))
   };
 }
@@ -441,14 +522,17 @@ export function listMindMapLeavesNeedingBreakdown(
   limit = 10
 ): LearningMindMapLeaf[] {
   const out: LearningMindMapLeaf[] = [];
+  const seen = new Set<string>();
   for (const branch of model.branches) {
     for (const leaf of branch.children) {
       if (leaf.children && leaf.children.length > 0) continue;
       if (!leaf.name) continue;
+      const key = mindLeafKey(leaf);
+      if (seen.has(key)) continue;
+      seen.add(key);
       out.push(leaf);
       if (out.length >= limit) return out;
     }
   }
   return out;
 }
-

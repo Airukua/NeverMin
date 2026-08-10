@@ -3,6 +3,7 @@ import type {
   LearningMindMapModel
 } from '../core/graph/learningMindMap';
 import {
+  dedupeMindLeaves,
   listMindMapLeavesNeedingBreakdown,
   mergeMindMapBreakdown
 } from '../core/graph/learningMindMap';
@@ -12,6 +13,7 @@ import { runLoggedLlmCall, withCompletionUsageSummary } from '../utils/llmActivi
 import type { LlmSession } from '../utils/llmSession';
 import { Logger } from '../utils/logger';
 import { setCachedPromptResponse } from '../core/llm/promptCache';
+import { resolveOllamaThinkOption } from '../core/llm/thinkingModel';
 
 function buildBreakdownPrompt(leaves: LearningMindMapLeaf[], lang: 'id' | 'en'): string {
   const items = leaves.map((leaf, i) => ({
@@ -83,7 +85,7 @@ function parseBreakdownResponse(
         if (kids.length >= 5) break;
       }
       if (kids.length > 0) {
-        out[item.id] = kids;
+        out[item.id] = dedupeMindLeaves(kids);
       }
     }
     return out;
@@ -123,7 +125,12 @@ export async function enrichMindMapBreakdownWithLlm(options: {
       () =>
         provider.complete(prompt, {
           skipCache: false,
-          cacheResponse: false
+          cacheResponse: false,
+          think: resolveOllamaThinkOption(
+            options.session.provider,
+            options.session.model,
+            'prefer-off'
+          )
         }),
       withCompletionUsageSummary((text) =>
         text.trim() ? `breakdown ${Math.min(text.trim().length, 9999)}c` : 'empty'

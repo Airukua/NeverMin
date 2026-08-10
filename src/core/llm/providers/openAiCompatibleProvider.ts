@@ -435,8 +435,11 @@ export class OpenAiCompatibleProvider implements LlmProvider {
         num_ctx: getOllamaNumCtx()
       }
     };
-    // JSON gap explain: matikan thinking agar output tetap parseable.
-    body.think = options.think === undefined ? false : options.think;
+    // Only set `think` when the caller opted in/out (thinking models).
+    // Do NOT default to false — non-thinking models must omit the field.
+    if (options.think !== undefined) {
+      body.think = options.think;
+    }
 
     const res = await globalThis.fetch(`${native}/api/chat`, {
       method: 'POST',

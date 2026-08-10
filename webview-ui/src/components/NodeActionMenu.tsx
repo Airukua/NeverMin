@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { FileCode2, GitBranch, Sparkles, X } from 'lucide-react';
+import { FileCode2, GitBranch, RefreshCw, Sparkles, X } from 'lucide-react';
 import type { MermaidNodeMeta } from '../types';
+import { getCachedNodeExplain } from '../lib/explainCache';
 import { tw } from '../i18n';
 
 export interface NodeActionMenuState {
@@ -13,7 +14,10 @@ export interface NodeActionMenuState {
 interface NodeActionMenuProps {
   menu: NodeActionMenuState;
   onClose: () => void;
+  /** Open cached explanation, or run LLM if none. */
   onExplain: (meta: MermaidNodeMeta) => void;
+  /** Always re-run LLM (bypass cache). */
+  onReExplain: (meta: MermaidNodeMeta) => void;
   onFlowChart: (meta: MermaidNodeMeta) => void;
   onOpenFile: (meta: MermaidNodeMeta) => void;
   /** Sembunyikan Flow Chart (mis. sudah di detail Functions). */
@@ -24,22 +28,24 @@ export function NodeActionMenu({
   menu,
   onClose,
   onExplain,
+  onReExplain,
   onFlowChart,
   onOpenFile,
   showFlowChart = true
 }: NodeActionMenuProps) {
   const maxW = 240;
-  // Offset dari titik klik supaya gesture pembuka tidak “nembus” ke item menu.
   const left = Math.max(
     8,
     Math.min(menu.x + 14, (typeof window !== 'undefined' ? window.innerWidth : 400) - maxW - 8)
   );
   const top = Math.max(
     8,
-    Math.min(menu.y + 14, (typeof window !== 'undefined' ? window.innerHeight : 400) - 200)
+    Math.min(menu.y + 14, (typeof window !== 'undefined' ? window.innerHeight : 400) - 240)
   );
 
   const [armed, setArmed] = useState(false);
+  const hasCached = Boolean(getCachedNodeExplain(menu.meta)?.text?.trim());
+
   useEffect(() => {
     setArmed(false);
     const id = window.setTimeout(() => setArmed(true), 180);
@@ -104,8 +110,25 @@ export function NodeActionMenu({
           }
         >
           <Sparkles size={15} className="shrink-0 text-[#2dd4bf]" />
-          <span>{tw('nodeMenu.explain')}</span>
+          <span>{hasCached ? tw('nodeMenu.viewExplain') : tw('nodeMenu.explain')}</span>
         </button>
+
+        {hasCached ? (
+          <button
+            type="button"
+            role="menuitem"
+            className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[12px] transition hover:bg-white/[0.05]"
+            onClick={() =>
+              run(() => {
+                onReExplain(menu.meta);
+                onClose();
+              })
+            }
+          >
+            <RefreshCw size={15} className="shrink-0 text-[#a78bfa]" />
+            <span>{tw('nodeMenu.reExplain')}</span>
+          </button>
+        ) : null}
 
         {showFlowChart ? (
           <button
