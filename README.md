@@ -10,6 +10,7 @@ A VS Code / Cursor extension that parses your project, builds a code graph, and 
 [![Marketplace](https://img.shields.io/badge/VS%20Code-Install-blue?logo=visualstudiocode)](https://marketplace.visualstudio.com/items?itemName=abdul-wahid-rukua.nevermin)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Privacy: Local-first](https://img.shields.io/badge/Privacy-Local--first-brightgreen)](#-privacy--security)
+[![Languages: JS/TS/Python](https://img.shields.io/badge/Languages-JS%2FTS%20%7C%20Python-yellow)](#-parsed-languages)
 
 **[Install from Marketplace](https://marketplace.visualstudio.com/items?itemName=abdul-wahid-rukua.nevermin)** · [Quick Start](#-quick-start) · [Privacy & Security](#-privacy--security) · [Commands](#-commands-reference) · [Settings](#%EF%B8%8F-settings)
 
@@ -286,6 +287,8 @@ The sidebar **Pengaturan** panel mirrors the important actions: privacy mode, la
 </details>
 
 ## 🧩 Parsed Languages
+
+> **Current scope:** NeverMIN currently supports the **JavaScript family** (JS/JSX/TS/TSX) and **Python** only. Other languages are not yet parsed — support for more is on the roadmap.
 
 | Extension | Parser |
 |---|---|
