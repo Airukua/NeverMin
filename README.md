@@ -1,64 +1,91 @@
+<div align="center">
+
+<img src="media/icon.png" alt="NeverMIN logo" width="96" height="96" />
+
 # NeverMIN
 
-**Never Mind the confusion** — a VS Code / Cursor extension to quickly understand unfamiliar codebases.
+**Never Mind the confusion.**
+A VS Code / Cursor extension that parses your project, builds a code graph, and shows you where to start.
 
-NeverMIN parses your project, builds a *code graph*, then shows you:
+[![Marketplace](https://img.shields.io/badge/VS%20Code-Install-blue?logo=visualstudiocode)](https://marketplace.visualstudio.com/items?itemName=abdul-wahid-rukua.nevermin)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Privacy: Local-first](https://img.shields.io/badge/Privacy-Local--first-brightgreen)](#-privacy--security)
 
-- **Entry points** & **hubs** (heuristic centrality score)
-- **Main flow** Input → Process → Output (Mermaid)
-- **Learning Mind Map** (exploration order)
-- **Explain Code** via LLM (optional)
+**[Install from Marketplace](https://marketplace.visualstudio.com/items?itemName=abdul-wahid-rukua.nevermin)** · [Quick Start](#-quick-start) · [Privacy & Security](#-privacy--security) · [Commands](#-commands-reference) · [Settings](#%EF%B8%8F-settings)
+
+</div>
+
+---
+
+## ✨ What NeverMIN does
+
+| Feature | Description |
+|---|---|
+| 🧭 **Entry points & hubs** | Heuristic centrality score highlights where to start reading |
+| 🔀 **Main flow diagram** | Mermaid flowchart of Input → Process → Output |
+| 🗺️ **Learning Mind Map** | Suggested exploration order for onboarding |
+| 💬 **Explain Code** | Optional LLM narration — local (Ollama) or cloud |
+| 📜 **Git History insight** | Alive/frozen code, ownership, hidden file coupling |
+
+> Insights are based on heuristic graph analysis (degree + centrality) — a great onboarding map, not a substitute for a full architecture review.
 
 Repo: [github.com/abdulwahidrukua/NeverMIN](https://github.com/abdulwahidrukua/NeverMIN)
 
 ---
 
-## Privacy & security — analyze without leaking your code
+## 🔒 Privacy & Security
 
-NeverMIN is built so you can map a private or proprietary codebase **without sending source to a third party**, as long as you stay on the local path.
+NeverMIN is built so you can map a **private or proprietary codebase without sending source to a third party** — as long as you stay on the local path.
 
-### First choice in the sidebar
+### Step 1: pick a mode in the sidebar
 
-When you open NeverMIN, the sidebar asks you to pick **before** other features unlock:
+The sidebar asks you to choose **before** other features unlock. Change it any time via **Settings → Change privacy mode** (`NeverMIN: Choose Private / Public Codebase`).
 
-| Choice | Meaning |
-|--------|---------|
-| **Private codebase** | Local-only path: parse/graph/git stay on disk; LLM locked to **Ollama**; cloud API keys are cleared |
-| **Public codebase** | Same local tools, plus optional cloud LLM (Gemini, OpenAI, …) when you save a key |
+| Mode | Behavior |
+|---|---|
+| 🔐 **Private codebase** | Local-only: parse/graph/git stay on disk · LLM locked to **Ollama** · cloud API keys cleared |
+| 🌐 **Public codebase** | Same local tools, plus optional cloud LLM (Gemini, OpenAI, …) once you save a key |
 
-You can change this later under **Settings → Change privacy mode** (`NeverMIN: Choose Private / Public Codebase`).
+### What never leaves your machine (either mode)
 
-### What stays on your machine by default
+| Step | Runs where | Leaves your machine? |
+|---|---|---|
+| Parse files (Tree-sitter / fallback) | Local process | ❌ No |
+| Build code graph, entry/hub/flow insights | Local | ❌ No |
+| Mermaid diagrams & Mind Map | Local webview | ❌ No |
+| Git History (churn, owners, co-change) | Local `git` CLI | ❌ No |
+| Sidebar results & logs | Local workspace state | ❌ No |
 
-| Step | Where it runs | Leaves your machine? |
-|------|----------------|----------------------|
-| Parse files (Tree-sitter / fallback) | Local VS Code / Cursor process | **No** |
-| Build code graph, entry/hub/flow insights | Local | **No** |
-| Mermaid diagrams & Learning Mind Map | Local webview | **No** |
-| Git History (churn, owners, co-change) | Local `git` CLI | **No** |
-| Sidebar results & logs | Local workspace state / Output channel | **No** |
+Full structural analysis and Git History run **with no API key and no network LLM call**.
 
-You can run full structural analysis and Git History **with no API key and no network LLM call**. Your repo is read from disk; nothing is uploaded for that pipeline.
+<details>
+<summary><strong>🔐 Fully private LLM mode (recommended for sensitive repos)</strong></summary>
 
-### Fully private LLM mode (recommended for sensitive repos)
+<br>
 
 1. In the sidebar, choose **Private codebase** (or Command Palette → `NeverMIN: Use Private Codebase Mode`).
 2. Install and run [Ollama](https://ollama.com), then pick a model (`NeverMIN: Pilih Model Ollama`).
-3. Cloud API keys are cleared automatically; provider switching to Gemini/OpenAI/etc. is blocked until you switch to Public mode.
+3. Cloud API keys are cleared automatically; switching to Gemini/OpenAI/etc. is blocked until you switch to Public mode.
 
 With Ollama:
-
-- Explain Code / insight narration talks to `127.0.0.1` (or your configured `nevermin.ollamaBaseUrl`) only.
+- Explain Code / insight narration talks to `127.0.0.1` (or your configured `nevermin.ollamaBaseUrl`) **only**.
 - No cloud API key is required or kept for that session path.
-- Your prompts and code snippets are not sent to NeverMIN’s authors or a hosted NeverMIN server — there is none.
+- Prompts and code snippets are never sent to NeverMIN's authors or a hosted server — there is none.
 
-### When code *can* leave your machine
+</details>
 
-Only if **you** choose a **cloud** provider (Gemini, OpenAI, Anthropic, OpenRouter, …) and run an LLM feature (Explain Code, narrative enrichment). Then the prompt (including selected code / insight summaries) goes to **that** provider under **their** terms.
+<details>
+<summary><strong>⚠️ When code <em>can</em> leave your machine</strong></summary>
 
-To stay leak-free: keep `nevermin.provider` = `ollama`, or skip LLM features entirely and use graph + Git History alone.
+<br>
 
-### Practical checklist for a secure setup
+Only if **you** choose a **cloud** provider (Gemini, OpenAI, Anthropic, OpenRouter, …) and run an LLM feature (Explain Code, narrative enrichment). The prompt — including selected code / insight summaries — then goes to **that** provider under **their** terms.
+
+To stay leak-free: keep `nevermin.provider = ollama`, or skip LLM features entirely and use graph + Git History alone.
+
+</details>
+
+### Secure setup checklist
 
 ```text
 1. nevermin.provider = ollama   (auto when Private mode is chosen)
@@ -67,55 +94,53 @@ To stay leak-free: keep `nevermin.provider` = `ollama`, or skip LLM features ent
 4. When finished: sidebar → Settings → Wipe this workspace data
 ```
 
-**Wipe this workspace data** clears analysis, Git History, file checks, and LLM prompt cache from VS Code `workspaceState` for the current workspace (repo files unchanged). Choose **Full reset** if you also want to re-pick Private/Public.
+> **Wipe this workspace data** clears analysis, Git History, file checks, and LLM prompt cache from VS Code `workspaceState` for the current workspace — repo files are untouched. Choose **Full reset** to also re-pick Private/Public.
 
 ---
 
-## How to use in VS Code / Cursor
+## 🚀 Quick Start
 
-### A. Install from the Marketplace (recommended)
+### A. Install from the Marketplace *(recommended)*
 
-**NeverMIN** is on the Visual Studio Marketplace:
-
-**[Install NeverMIN](https://marketplace.visualstudio.com/items?itemName=abdul-wahid-rukua.nevermin)**
+<table>
+<tr><td width="50%" valign="top">
 
 **VS Code**
+1. Open Extensions (`Ctrl+Shift+X` / `Cmd+Shift+X`)
+2. Search **NeverMIN**
+3. Click **Install**, reload if prompted
 
-1. Open **Extensions** (`Ctrl+Shift+X` / `Cmd+Shift+X`).
-2. Search **NeverMIN**.
-3. Click **Install**, then reload if prompted.
+</td><td width="50%" valign="top">
 
 **Cursor**
 
-Cursor can install many VS Code Marketplace extensions the same way: Extensions → search **NeverMIN** → **Install**.  
-If it does not appear in search, use [Install from VSIX](#b-install-from-vsix-optional) below.
+Extensions → search **NeverMIN** → **Install**.
+If it doesn't appear, use [Install from VSIX](#b-install-from-vsix-optional).
 
-#### Confirm it is installed
+</td></tr>
+</table>
 
-- Extensions list → **NeverMIN** → installed and enabled.
-- Left **Activity Bar** → NeverMIN icon should appear.
-- Command Palette → commands starting with `NeverMIN:`.
+**Confirm it's installed:** Extensions list shows NeverMIN enabled → NeverMIN icon appears in the Activity Bar → Command Palette lists `NeverMIN:` commands.
 
-#### Use it on a project
+### Use it on a project
 
 1. **File → Open Folder…** and open the codebase you want to understand.
 2. Click the **NeverMIN** icon in the Activity Bar.
-3. First run: choose **Private codebase** (local / Ollama only) or **Public codebase** (optional cloud LLM).
-4. In the sidebar:
-   - **2. Run** → analyze the whole repo, or
-   - **3. Select Files** → check files → analyze the selection.
+3. First run → choose **Private codebase** (local / Ollama only) or **Public codebase** (optional cloud LLM).
+4. In the sidebar: **2. Run** (analyze whole repo) or **3. Select Files** (analyze a selection).
 5. After analysis:
-   - **4. Structure** → Folder → File → Function; click an item to open the **Functions** graph.
-   - **5. Analysis Results** → entry / hub / main flow / mind map.
-   - **6. Git History** → optional churn / owners / coupling (needs a git repo).
+   - **4. Structure** → Folder → File → Function → click to open the **Functions** graph
+   - **5. Analysis Results** → entry / hub / main flow / mind map
+   - **6. Git History** → optional churn / owners / coupling *(needs a git repo)*
 
-Optional LLM: Command Palette → pick provider (prefer **Ollama** for private code). See [Everyday workflow](#everyday-workflow) and [Privacy & security](#privacy--security--analyze-without-leaking-your-code).
+Optional LLM: Command Palette → pick a provider (prefer **Ollama** for private code).
 
-### B. Install from VSIX (optional)
+<details>
+<summary><strong>B. Install from VSIX</strong> <sub>(local build, pre-release, or no Marketplace access)</sub></summary>
 
-Use this if you want a local build, a pre-release build, or Marketplace search is unavailable in your editor.
+<br>
 
-Requirements: **Node.js 18+**, **npm**.
+Requirements: **Node.js 18+**, **npm**
 
 ```bash
 git clone https://github.com/abdulwahidrukua/NeverMIN.git
@@ -124,12 +149,11 @@ npm install
 npm run package
 ```
 
-This writes `nevermin-<version>.vsix` in the repo root (version from `package.json`).
+Writes `nevermin-<version>.vsix` in the repo root.
 
 **UI:** Extensions → `…` → **Install from VSIX…** → select the `.vsix` → reload if prompted.
 
-**CLI**
-
+**CLI:**
 ```bash
 code --install-extension ./nevermin-0.0.2.vsix
 # or, for Cursor:
@@ -137,15 +161,15 @@ cursor --install-extension ./nevermin-0.0.2.vsix
 ```
 
 **Update / uninstall**
+- Marketplace: Extensions → NeverMIN → Update / Uninstall
+- VSIX: rebuild with `npm run package` and reinstall (replaces previous version), or Uninstall from Extensions
 
-- **Marketplace:** Extensions → NeverMIN → Update / Uninstall.
-- **VSIX:** rebuild with `npm run package`, install again (replaces the previous version), or Uninstall from Extensions.
+</details>
 
-### C. Run from source (development)
+<details>
+<summary><strong>C. Run from source</strong> <sub>(for hacking on NeverMIN itself)</sub></summary>
 
-For hacking on NeverMIN itself (Extension Development Host):
-
-1. Clone and build:
+<br>
 
 ```bash
 git clone https://github.com/abdulwahidrukua/NeverMIN.git
@@ -154,127 +178,117 @@ npm install
 npm run compile
 ```
 
-2. Open the `NeverMIN` folder in VS Code / Cursor.
-3. Press **F5** (*Run Extension*) → an **Extension Development Host** window opens.
-4. In that window, go to **File → Open Folder** and select the project you want to analyze.
-5. In the left Activity Bar, click the **NeverMIN** icon.
+1. Open the `NeverMIN` folder in VS Code / Cursor.
+2. Press **F5** (*Run Extension*) → an **Extension Development Host** window opens.
+3. In that window: **File → Open Folder** → select the project you want to analyze.
+4. Click the **NeverMIN** icon in the Activity Bar.
 
-> Development Host is temporary for testing. For daily use, prefer [Install from the Marketplace](#a-install-from-the-marketplace-recommended).
+> Development Host is for testing only — for daily use, prefer [installing from the Marketplace](#a-install-from-the-marketplace-recommended).
+
+</details>
 
 ---
 
-## Everyday workflow
+## 🔄 Everyday Workflow
 
-### 1. (Optional) Configure language & LLM
+<table>
+<tr><td width="34px" align="center"><strong>1</strong></td><td>
 
-In the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
+**(Optional) Configure language & LLM** — Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
 
 | Command | Function |
-|---------|----------|
+|---|---|
 | `NeverMIN: Pilih Bahasa / Choose Language` | UI in `id` or `en` |
 | `NeverMIN: Pilih LLM Provider` | Gemini, OpenAI, Anthropic, OpenRouter, DeepSeek, Groq, Mistral, Together, xAI, **Ollama (local)** |
 | `NeverMIN: Pilih Model Ollama` | Detect installed / loaded Ollama models |
-| `NeverMIN: Simpan API Key` | Cloud providers only — stored in SecretStorage (cleared when you switch to Ollama) |
+| `NeverMIN: Simpan API Key` | Cloud providers only — stored in SecretStorage, cleared when you switch to Ollama |
 
-Without a cloud API key, graph analysis, diagrams, and structural Git History still work. For private LLM narration, use **Ollama** (see [Privacy & security](#privacy--security--analyze-without-leaking-your-code)).
+Without a cloud key, graph analysis, diagrams, and structural Git History still work.
 
-### 2. Analyze the repo
+</td></tr>
+<tr><td align="center"><strong>2</strong></td><td>
 
-In the NeverMIN sidebar:
+**Analyze the repo** — in the sidebar: check **Status**, optionally check off files in **Select Files**, then **Run** (whole repo or selection).
+Same via Command Palette: `NeverMIN: Analyze Repo Structure` · `NeverMIN: Select Files to Analyze`
 
-1. Check the **Status** (workspace open, key configured or not).
-2. (Optional) check off files in **Select Files**, or leave it as full-repo.
-3. In **Run**, choose whole-repo analysis or the selected files.
+</td></tr>
+<tr><td align="center"><strong>3</strong></td><td>
 
-Same commands are available via the Command Palette:
-
-- `NeverMIN: Analyze Repo Structure`
-- `NeverMIN: Select Files to Analyze`
-
-### 3. Analyze Git History (sidebar only)
-
-Answers: what is alive vs frozen, why the code looks like this, who knows the area, and hidden coupling (files often committed together).
-
-1. Ensure the folder is a **git repository**.
-2. In **Run** → **Analyze Git History**, or open **6. Git History** → **Run Git History analysis**.
-3. Results stay in the sidebar (no webview):
-   - LLM summary (if Ollama or a cloud provider is configured)
-   - Alive / Frozen
-   - Why it looks like this (commits)
-   - Who knows this (owners)
-   - Hidden coupling
+**Analyze Git History** *(sidebar only)* — answers what's alive vs. frozen, why the code looks like this, who knows the area, and hidden coupling.
+1. Ensure the folder is a git repository.
+2. **Run → Analyze Git History**, or open **6. Git History → Run Git History analysis**.
+3. Results stay in the sidebar: LLM summary (if configured) · Alive/Frozen · Commits · Owners · Hidden coupling
 
 Command: `NeverMIN: Analisis Git History`
 
-### 4. Read the graph results
+</td></tr>
+<tr><td align="center"><strong>4</strong></td><td>
 
-In **5. Analysis Results** you'll typically see:
-
-- graph statistics
-- **Main Flow** (Input → Process → Output)
-- entry points & hubs
-- summary / narration (if LLM is enabled)
-
-Open diagrams:
+**Read the graph results** — **5. Analysis Results** shows graph statistics, Main Flow, entry points/hubs, and narration (if LLM enabled).
 
 | Command | Content |
-|---------|---------|
-| `NeverMIN: Open Main Flow (Mermaid)` | flowchart of the main data flow |
-| `NeverMIN: Open Insight Graph` | architecture / module / functions panel |
-| `NeverMIN: Open Learning Mind Map` | mind map of learning order |
-| `NeverMIN: Open Insights Summary` | insights narration |
+|---|---|
+| `NeverMIN: Open Main Flow (Mermaid)` | Flowchart of the main data flow |
+| `NeverMIN: Open Insight Graph` | Architecture / module / functions panel |
+| `NeverMIN: Open Learning Mind Map` | Mind map of learning order |
+| `NeverMIN: Open Insights Summary` | Insights narration |
 | `NeverMIN: Buka Ringkasan Git History` | Git History narration |
 
-Or use **4. Structure**: expand Folder → File → Function and click an item to open the focused **Functions** graph.
+Or use **4. Structure**: expand Folder → File → Function, click to open the focused **Functions** graph. Click a node / insight chip to jump to the related file.
 
-Click a node / insight chip to jump to the related file.
+</td></tr>
+<tr><td align="center"><strong>5</strong></td><td>
 
-### 5. Explain a code snippet
+**Explain a code snippet** — select code in the editor (or focus the active file), then Command Palette → `NeverMIN: Jelaskan Kode Ini`.
+For a private repo, prefer **Ollama** so the snippet never hits a cloud API.
 
-1. Select code in the editor (or focus the active file).
-2. Command Palette → `NeverMIN: Jelaskan Kode Ini`.
-
-Uses the active provider. For a private repo, prefer **Ollama** so the snippet never hits a cloud API.
+</td></tr>
+</table>
 
 ---
 
-## Settings
+## ⚙️ Settings
 
-Open **Settings** and search for `nevermin`, or run `NeverMIN: Open Settings`.
+Open **Settings** and search `nevermin`, or run `NeverMIN: Open Settings`.
 
-Privacy mode (**Private / Public**) is **not** a VS Code setting — choose it in the NeverMIN sidebar (per workspace). Private locks the provider to Ollama and clears cloud API keys.
+> Privacy mode (**Private / Public**) is **not** a VS Code setting — it's chosen in the NeverMIN sidebar, per workspace. Private mode locks the provider to Ollama and clears cloud API keys.
 
 | Setting | Default | Description |
-|---------|---------|-------------|
+|---|---|---|
 | `nevermin.language` | `id` | UI + LLM language (`id` \| `en`) |
-| `nevermin.provider` | `ollama` | LLM provider. Private mode forces `ollama`. Public allows cloud providers. |
-| `nevermin.model` | _(empty)_ | Model override; empty = provider default. For Ollama prefer `NeverMIN: Pilih Model Ollama`. |
+| `nevermin.provider` | `ollama` | LLM provider — Private mode forces `ollama`; Public allows cloud providers |
+| `nevermin.model` | *(empty)* | Model override; empty = provider default. For Ollama prefer `NeverMIN: Pilih Model Ollama` |
 | `nevermin.temperature` | `0.2` | LLM sampling temperature |
 | `nevermin.ollamaBaseUrl` | `http://127.0.0.1:11434/v1` | Ollama OpenAI-compatible base URL |
 | `nevermin.maxAnalysisFiles` | `500` | Cap on files per analysis run |
 
-API keys are **not** a VS Code setting — use `NeverMIN: Simpan API Key` (SecretStorage per provider). Private / Ollama clears cloud keys automatically.
+API keys are **not** a VS Code setting — use `NeverMIN: Simpan API Key` (SecretStorage, per provider). Switching to Private / Ollama clears cloud keys automatically.
 
-Sidebar **Pengaturan** mirrors the important actions: privacy mode, language, provider, API key / Ollama model, wipe workspace data.
+The sidebar **Pengaturan** panel mirrors the important actions: privacy mode, language, provider, API key / Ollama model, wipe workspace data.
 
 ---
 
-## Other commands
+## 📖 Commands Reference
+
+<details>
+<summary><strong>Show all other commands</strong></summary>
+
+<br>
 
 | Command | Function |
-|---------|----------|
+|---|---|
 | `NeverMIN: Refresh Sidebar` | Reload the sidebar tree |
 | `NeverMIN: Buka Output Logs` | NeverMIN log channel |
 | `NeverMIN: Bersihkan Logs` | Clear activity log |
 | `NeverMIN: Centang Semua File` / `Kosongkan Centang File` | File selection for analysis |
 | `NeverMIN: Pilih Model Ollama` | List & select local Ollama models |
 
----
+</details>
 
-## Parsed languages
+## 🧩 Parsed Languages
 
 | Extension | Parser |
-|-----------|--------|
+|---|---|
 | `.ts` | Tree-sitter TypeScript |
 | `.tsx` | Tree-sitter TSX |
 | `.py` | Tree-sitter Python |
@@ -282,12 +296,10 @@ Sidebar **Pengaturan** mirrors the important actions: privacy mode, language, pr
 
 If the Tree-sitter WASM fails to load, symbol extraction still falls back and works.
 
----
-
-## Development scripts
+## 🛠️ Development Scripts
 
 | Script | Function |
-|--------|----------|
+|---|---|
 | `npm run compile` | Build `src/` → `dist/` |
 | `npm run watch` | Auto-rebuild |
 | `npm test` | Unit tests |
@@ -298,14 +310,8 @@ If the Tree-sitter WASM fails to load, symbol extraction still falls back and wo
 
 ---
 
-## Quick note
+<div align="center">
 
-Insights (entry / hub / flow) are based on heuristic graph analysis (degree + centrality), **not** formal proof of data flow. Good for an onboarding map, not a replacement for a full architecture review.
+**[MIT License](LICENSE)** · Built by **[Abdul Wahid Rukua](https://github.com/abdulwahidrukua)**
 
----
-
-## License
-
-[MIT](LICENSE)
-
-**Abdul Wahid Rukua** — [GitHub](https://github.com/abdulwahidrukua)
+</div>
